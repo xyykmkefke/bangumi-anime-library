@@ -545,7 +545,7 @@ async function main() {
     );
 
     // 网格/列表视图切换：写入 hash，刷新后保持
-    await cdp.evaluate("document.querySelector('#viewToggle [data-view=\"list\"]').click()");
+    await cdp.evaluate("document.querySelector('#resultbar [data-view=\"list\"]').click()");
     await sleep(300);
     const listState = await cdp.evaluate(
       "document.getElementById('grid').classList.contains('list') + '|' + /(?:^|[#&])v=list(?:&|$)/.test(location.hash)",
@@ -563,7 +563,7 @@ async function main() {
     }
     check('列表视图刷新后保持', listRestored === true);
 
-    await cdp.evaluate("document.querySelector('#viewToggle [data-view=\"grid\"]').click()");
+    await cdp.evaluate("document.querySelector('#resultbar [data-view=\"grid\"]').click()");
     await sleep(300);
 
     // 浏览偏好持久化：无 hash 打开时应沿用上次筛选
@@ -941,19 +941,19 @@ async function main() {
 
     // 看板视图：四列按状态分组，并可切回网格
     const boardInfo = await cdp.evaluate(`(() => {
-      document.getElementById('boardBtn').click();
+      document.querySelector('#resultbar [data-view="board"]').click();
       const cols = [...document.querySelectorAll('#grid .board-col')];
       const heads = cols.map((c) => c.querySelector('.board-head b').textContent).join(',');
       const total = cols.reduce((sum, c) => sum + c.querySelectorAll('.card').length, 0);
       const hash = new URLSearchParams(location.hash.slice(1)).get('v');
-      const btnText = document.getElementById('boardBtn').textContent;
-      document.getElementById('boardBtn').click();
-      return [cols.length, heads, total, hash, btnText,
+      const active = document.querySelector('#resultbar [data-view].active').dataset.view;
+      document.querySelector('#resultbar [data-view="board"]').click();
+      return [cols.length, heads, total, hash, active,
         new URLSearchParams(location.hash.slice(1)).get('v')].join('|');
     })()`);
     check(
       '看板视图按状态分四列',
-      boardInfo === '4|想看,在看,看完,弃番|3|board|网格视图|grid',
+      boardInfo === '4|想看,在看,看完,弃番|3|board|board|grid',
       boardInfo,
     );
 
@@ -1751,16 +1751,16 @@ async function main() {
     const calInfo = await cdp.evaluate(`(async () => {
       document.querySelectorAll('.tab')[0].click();
       await new Promise((r) => setTimeout(r, 300));
-      document.getElementById('calBtn').click();
+      document.querySelector('#resultbar [data-view="calendar"]').click();
       await new Promise((r) => setTimeout(r, 350));
       const cols = document.querySelectorAll('#grid .cal-col').length;
       const items = document.querySelectorAll('#grid .cal-item').length;
-      const label = document.getElementById('calBtn').textContent;
-      document.getElementById('calBtn').click();
+      const active = document.querySelector('#resultbar [data-view].active').dataset.view;
+      document.querySelector('#resultbar [data-view="calendar"]').click();
       await new Promise((r) => setTimeout(r, 250));
-      return [cols, items > 0, label].join('|');
+      return [cols, items > 0, active].join('|');
     })()`);
-    check('可切换到本季日历并显示 7 天', calInfo.startsWith('7|true|'), calInfo);
+    check('可切换到本季日历并显示 7 天', calInfo.startsWith('7|true|calendar'), calInfo);
 
     // 命令面板：Ctrl+K 打开、可搜索番剧、Esc 关闭
     const paletteInfo = await cdp.evaluate(`(async () => {
@@ -1891,6 +1891,17 @@ async function main() {
       expandedState,
     );
 
+    const sheetState = await cdp.evaluate(`(() => {
+      const sheet = document.getElementById('filterSheet');
+      const panel = document.getElementById('filterPanel');
+      const f = document.getElementById('filters');
+      const rect = panel.getBoundingClientRect();
+      return [sheet.hidden, f.parentElement.id === 'filterSheetBody',
+        Math.abs(rect.bottom - window.innerHeight) <= 1,
+        getComputedStyle(document.getElementById('filterMask')).display !== 'none'].join('|');
+    })()`);
+    check('移动端筛选以底部抽屉展示', sheetState === 'false|true|true|true', sheetState);
+
     // 移动端紧凑头部：搜索默认收起，可点图标展开；主要控件达到 44px
     const mobileChrome = await cdp.evaluate(`(async () => {
       const search = document.getElementById('search').closest('.search');
@@ -1914,6 +1925,14 @@ async function main() {
         Number(mParts[2]) >= 44 && Number(mParts[3]) >= 44 && Number(mParts[4]) >= 44,
       mobileChrome,
     );
+
+    const sheetClosed = await cdp.evaluate(`(() => {
+      document.getElementById('filterDone').click();
+      return [document.getElementById('filterSheet').hidden,
+        document.getElementById('filters').parentElement.id,
+        document.getElementById('filterToggle').getAttribute('aria-expanded')].join('|');
+    })()`);
+    check('筛选抽屉可关闭并归位', sheetClosed === 'true|filtersSlot|false', sheetClosed);
 
     // 骨架屏：源码内含首屏占位，渲染后被真实卡片替换
     const skeletonSrc = await readFile(path.join(ROOT, 'index.html'), 'utf8');
