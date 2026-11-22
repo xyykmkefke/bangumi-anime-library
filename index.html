@@ -1,0 +1,3775 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>番剧库 · 我的追番</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
+<link rel="dns-prefetch" href="https://bgmimg.anibt.net">
+<meta name="theme-color" content="#0d0f14">
+<meta name="version" content="1.0.0">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --panel: #151821;
+    --panel-2: #1b1f29;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --text: #e9ecf3;
+    --muted: #8b93a7;
+    --muted-2: #6b7385;
+    --pink: #ff6b9d;
+    --purple: #8b7bff;
+    --gold: #ffd479;
+    --grad: linear-gradient(135deg, #ff6b9d, #8b7bff);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    background-image:
+      radial-gradient(900px 500px at 12% -10%, rgba(255, 107, 157, 0.10), transparent 60%),
+      radial-gradient(800px 500px at 88% -20%, rgba(139, 123, 255, 0.12), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2f3d; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(13, 15, 20, 0.84);
+    border-bottom: 1px solid var(--line);
+    /* iOS 刘海/灵动岛：顶部安全区，避免标题贴到状态栏 */
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .wrap {
+    max-width: 1320px;
+    margin: 0 auto;
+    /* 横屏时避开左右安全区，竖屏与桌面不受影响 */
+    padding: 0 max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 0 12px;
+    flex-wrap: wrap;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    white-space: nowrap;
+  }
+
+  .search {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .search svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 15px;
+    height: 15px;
+    stroke: var(--muted);
+  }
+
+  .search input {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px 0 34px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.18s;
+  }
+
+  .search input::placeholder { color: var(--muted-2); }
+  .search input:focus { border-color: rgba(255, 107, 157, 0.5); }
+
+  /* 搜索历史：聚焦空搜索框时浮出最近关键词 */
+  .searchhist {
+    position: absolute;
+    top: 46px;
+    left: 0;
+    right: 0;
+    z-index: 45;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  }
+
+  .searchhist[hidden] { display: none; }
+
+  .searchhist .hlabel {
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-right: 2px;
+  }
+
+  .hchip {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: #d6dbe8;
+    font-size: 12px;
+    padding: 4px 9px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .hchip:hover {
+    color: #fff;
+    border-color: rgba(255, 107, 157, 0.5);
+    background: rgba(255, 107, 157, 0.14);
+  }
+
+  /* 键盘 ↑/↓ 选中的历史词 */
+  .hchip.active {
+    color: #fff;
+    border-color: rgba(255, 107, 157, 0.72);
+    background: rgba(255, 107, 157, 0.24);
+  }
+
+  .hclear {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 11.5px;
+    cursor: pointer;
+    padding: 4px 2px;
+  }
+
+  .hclear:hover { color: #ffa8c6; }
+
+  /* 历史词单条删除：整颗药丸内嵌 × 按钮 */
+  .hitem {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel-2);
+    overflow: hidden;
+  }
+
+  .hitem .hchip {
+    border: 0;
+    background: transparent;
+    border-radius: 0;
+    padding: 4px 4px 4px 9px;
+  }
+
+  .hdel {
+    border: 0;
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 12px;
+    line-height: 1;
+    padding: 0 7px 0 2px;
+    cursor: pointer;
+  }
+
+  .hdel:hover { color: #ffa8c6; }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+
+  .tab {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: 0.18s;
+  }
+
+  .tab:hover { color: var(--text); }
+
+  .tab.active {
+    background: var(--grad);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .tab .count {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 11px;
+    opacity: 0.85;
+  }
+
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding-bottom: 12px;
+  }
+
+  .years {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .years::-webkit-scrollbar { display: none; }
+
+  .pill {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 12.5px;
+    padding: 5px 11px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .pill:hover { color: var(--text); border-color: var(--line-strong); }
+
+  .pill.active {
+    background: rgba(255, 107, 157, 0.14);
+    border-color: rgba(255, 107, 157, 0.5);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+
+  .pill.nav {
+    padding: 5px 9px;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .row2 {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  select {
+    height: 32px;
+    padding: 0 8px;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: #d6dbe8;
+    font-size: 12.5px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  select:hover { border-color: var(--line-strong); }
+
+  .spacer { flex: 1; }
+
+  .hint {
+    font-size: 12px;
+    color: var(--muted-2);
+    white-space: nowrap;
+  }
+
+  /* 备份提示：不随移动端隐藏 dataHint 的规则一起消失 */
+  .backup-hint {
+    font-size: 12px;
+    color: var(--muted-2);
+    white-space: nowrap;
+  }
+
+  .backup-hint[hidden] { display: none; }
+
+  main { padding: 18px 0 90px; }
+
+  .resultbar {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 14px;
+    min-height: 22px;
+  }
+
+  .resultbar b { color: var(--pink); font-size: 14px; }
+  .resultbar span { font-size: 12.5px; color: var(--muted); }
+
+  .minebar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+  }
+
+  .notice {
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 212, 121, 0.35);
+    border-radius: 12px;
+    background: rgba(255, 212, 121, 0.10);
+    color: #ffd479;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .statusrow {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 0 0 14px;
+  }
+
+  .statusrow .pill .n {
+    margin-left: 4px;
+    font-size: 11px;
+    opacity: 0.75;
+  }
+
+  /* 收藏统计概览 */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .stats[hidden] { display: none; }
+
+  .stat-card {
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+
+  .stat-card span {
+    display: block;
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-bottom: 4px;
+  }
+
+  .stat-card b {
+    font-size: 17px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 个人评分分布 */
+  .ratingboard {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+
+  .ratingboard[hidden] { display: none; }
+
+  .ratingboard-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .ratingboard-head b { color: var(--text); font-size: 13px; }
+
+  .ratingbars {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 96px;
+  }
+
+  .rcol {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 100%;
+  }
+
+  .rcol .rfill {
+    width: 100%;
+    min-height: 2px;
+    border-radius: 4px 4px 0 0;
+    background: linear-gradient(180deg, #ff6b9d, #8b7bff);
+    transition: height 0.25s;
+  }
+
+  .rcol.zero .rfill { background: #262b38; }
+
+  .rcol .rn { font-size: 10.5px; color: var(--muted-2); }
+  .rcol .rv { font-size: 10.5px; color: var(--muted); }
+
+  .rating-empty {
+    font-size: 12.5px;
+    color: var(--muted-2);
+    padding: 6px 0 2px;
+  }
+
+  /* 年度回顾：按首播年份汇总收藏 */
+  .yearreview {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+
+  .yearreview[hidden] { display: none; }
+
+  .yr-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+  }
+
+  .review-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+  }
+
+  .review-fav {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 107, 157, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 107, 157, 0.08);
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--muted);
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+  }
+
+  .review-fav:hover {
+    background: rgba(255, 107, 157, 0.16);
+    border-color: rgba(255, 107, 157, 0.55);
+  }
+
+  .review-fav:focus-visible {
+    outline: 2px solid var(--pink);
+    outline-offset: 2px;
+  }
+
+  .review-fav b { color: var(--text); font-size: 13.5px; }
+  .review-fav i { font-style: normal; color: #ffa8c6; font-size: 12px; margin-left: auto; }
+
+  /* 继续观看：在看/已开看番剧的下一集入口 */
+  .continue {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 107, 157, 0.28);
+    border-radius: 12px;
+    background: linear-gradient(160deg, rgba(255, 107, 157, 0.08), rgba(139, 123, 255, 0.06));
+  }
+
+  .continue[hidden] { display: none; }
+
+  .continue-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .continue-head b { color: var(--text); font-size: 13px; }
+
+  .continue-head select { margin-left: auto; flex: 0 0 auto; }
+
+  .continue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .continue-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(13, 15, 20, 0.45);
+  }
+
+  /* 小封面：帮助快速辨认条目，无图时显示占位 */
+  .continue-item .ci-cover {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 46px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--panel-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-2);
+    font-size: 10px;
+  }
+
+  .continue-item .ci-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .continue-item .ci-cover.noimg::after { content: "无图"; }
+
+  .continue-item .ci-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .continue-item .ci-main b {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .continue-item .ci-main span { font-size: 11.5px; color: var(--muted-2); }
+
+  /* 继续观看：按每话 24 分钟估算剩余时长 */
+  .continue-item .ci-main em {
+    display: block;
+    margin-top: 2px;
+    font-style: normal;
+    font-size: 11px;
+    color: #8f98ad;
+  }
+
+  .continue-item .btn { flex: 0 0 auto; }
+
+  /* 最近浏览：我的番剧页顶部的快捷回访 */
+  .recent {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+
+  .recent[hidden] { display: none; }
+
+  .recent .continue-head { align-items: center; }
+
+  .recent-clear {
+    margin-left: auto;
+    flex: 0 0 auto;
+    height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .recent-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .rchip {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: #d6dbe8;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .rchip:hover {
+    color: #fff;
+    border-color: rgba(255, 107, 157, 0.5);
+    background: rgba(255, 107, 157, 0.14);
+  }
+
+  /* 最近浏览单条移除：小尺寸 × 按钮，避免误触整行回访 */
+  .rwrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .rclose {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .rclose:hover {
+    color: #fff;
+    border-color: rgba(255, 107, 157, 0.5);
+  }
+
+  .badge.status {
+    left: 8px;
+    bottom: 8px;
+    background: rgba(0, 0, 0, 0.62);
+    color: var(--gold);
+  }
+
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+
+  .modal[hidden] { display: none; }
+
+  .modal-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 7, 10, 0.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .modal-panel {
+    position: relative;
+    width: min(420px, 100%);
+    padding: 20px;
+    border: 1px solid var(--line-strong);
+    border-radius: 16px;
+    background: var(--panel);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    /* 详情内容较长时在弹窗内滚动，保证小屏也能触达底部操作 */
+    max-height: calc(100vh - 40px);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-panel h2 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+
+  .modal-sub {
+    margin: 0 0 16px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  /* 详情内上一部 / 下一部，用于在当前筛选结果里连续浏览 */
+  .detail-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .detail-nav[hidden] { display: none; }
+
+  .detail-nav .btn {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .status-opts {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .status-opts button {
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: #d9deea;
+    font-size: 13px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .status-opts button:hover { border-color: var(--line-strong); }
+
+  .status-opts button.active {
+    background: rgba(255, 107, 157, 0.16);
+    border-color: rgba(255, 107, 157, 0.55);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+
+  .status-opts[hidden] { display: none; }
+
+  /* 卡片长按浮出的快捷状态菜单 */
+  .cardmenu {
+    position: fixed;
+    z-index: 70;
+    width: 208px;
+    padding: 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55);
+  }
+
+  .cardmenu[hidden] { display: none; }
+
+  .cardmenu-title {
+    margin: 0 2px 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cardmenu-opts {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .cardmenu-opts button,
+  .cardmenu-detail {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: #d9deea;
+    font-size: 12px;
+    padding: 7px 4px;
+    cursor: pointer;
+    transition: 0.15s;
+    font-family: inherit;
+  }
+
+  .cardmenu-opts button:hover,
+  .cardmenu-detail:hover { border-color: var(--line-strong); color: #fff; }
+
+  .cardmenu-opts button.active {
+    background: rgba(255, 107, 157, 0.16);
+    border-color: rgba(255, 107, 157, 0.55);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+
+  .cardmenu-detail {
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  /* 详情内的观看进度与个人评分 */
+  .track {
+    margin: 0 0 14px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel-2);
+  }
+
+  .track[hidden] { display: none; }
+
+  .track-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .track-row + .track-row { margin-top: 10px; }
+
+  .stepper {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  /* 直接输入集数跳转，适合从中间开始补番 */
+  .stepper input {
+    width: 52px;
+    height: 28px;
+    padding: 0 4px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    text-align: center;
+    outline: none;
+  }
+
+  .stepper input:focus { border-color: rgba(255, 107, 157, 0.5); }
+
+  .stepper input::-webkit-outer-spin-button,
+  .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  /* 详情内剩余话数提示：回答「还要看多久」 */
+  .track-remain {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+
+  .track-remain[hidden] { display: none; }
+
+  .stepper button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .stepper button:hover:not(:disabled) { border-color: rgba(255, 107, 157, 0.55); }
+
+  .stepper button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .stepper b { min-width: 20px; text-align: center; color: var(--text); font-size: 13px; }
+  .stepper span { font-size: 12px; color: var(--muted-2); }
+
+  /* 详情内一键看完：仅在有总话数且未看完时出现 */
+  .track-done {
+    flex: 0 0 auto;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .track-done[hidden] { display: none; }
+
+  /* 单条备注：随收藏一起保存 */
+  .note-row input {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12.5px;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .note-row input::placeholder { color: var(--muted-2); }
+  .note-row input:focus { border-color: rgba(255, 107, 157, 0.5); }
+  .note-row .noteclear { height: 30px; padding: 0 10px; font-size: 12px; flex-shrink: 0; }
+
+  .ratechips {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .ratechips button {
+    min-width: 25px;
+    height: 25px;
+    padding: 0 4px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: #b9c0d0;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .ratechips button:hover { border-color: var(--line-strong); }
+
+  .ratechips button.active {
+    background: rgba(255, 212, 121, 0.16);
+    border-color: rgba(255, 212, 121, 0.55);
+    color: var(--gold);
+    font-weight: 700;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .detail-panel {
+    display: flex;
+    gap: 18px;
+    width: min(620px, 100%);
+    align-items: flex-start;
+  }
+
+  .detail-cover {
+    flex: 0 0 168px;
+    width: 168px;
+    aspect-ratio: 3 / 4;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #0b0d12;
+    display: grid;
+    place-items: center;
+    color: #394052;
+    font-size: 12px;
+  }
+
+  .detail-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .detail-main { flex: 1; min-width: 0; }
+
+  .detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .detail-meta .chip {
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: #cfd6e6;
+    font-size: 11.5px;
+  }
+
+  .detail-meta .chip i {
+    margin-right: 4px;
+    font-style: normal;
+    color: var(--muted-2);
+  }
+
+  /* 季度跳转：详情里直接进入该年该季度的全量列表 */
+  .detail-meta .chipjump {
+    padding: 4px 8px;
+    border: 1px solid rgba(255, 107, 157, 0.45);
+    border-radius: 8px;
+    background: rgba(255, 107, 157, 0.10);
+    color: var(--pink);
+    font-family: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+  }
+
+  .detail-meta .chipjump:hover {
+    background: rgba(255, 107, 157, 0.2);
+    border-color: rgba(255, 107, 157, 0.7);
+  }
+
+  .detail-meta .chipjump:focus-visible {
+    outline: 2px solid var(--pink);
+    outline-offset: 2px;
+  }
+
+  /* 类型 / 地区标签：点击进入对应全库筛选 */
+  .detail-meta .chipbtn {
+    font-family: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+  }
+
+  .detail-meta .chipbtn:hover {
+    background: rgba(255, 107, 157, 0.14);
+    border-color: rgba(255, 107, 157, 0.55);
+  }
+
+  .detail-meta .chipbtn:focus-visible {
+    outline: 2px solid var(--pink);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 560px) {
+    .detail-panel { flex-direction: column; }
+    .detail-cover { width: 120px; flex-basis: 120px; }
+  }
+
+  .minebar .stat { font-size: 13px; color: var(--muted); }
+  .minebar .stat b { color: var(--text); font-size: 16px; }
+
+  .btn {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: #d9deea;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .btn:hover { border-color: var(--line-strong); background: #232836; }
+  .btn.primary { background: var(--grad); border-color: transparent; color: #fff; font-weight: 600; }
+  .btn.danger:hover { border-color: rgba(255, 92, 92, 0.6); color: #ff9b9b; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 16px;
+  }
+
+  /* 列表视图：横向卡片，信息密度更高 */
+  .grid.list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .grid.list .card { display: flex; align-items: stretch; }
+
+  .grid.list .cover {
+    flex: 0 0 64px;
+    width: 64px;
+    aspect-ratio: auto;
+    min-height: 84px;
+  }
+
+  .grid.list .cover img { height: 100%; }
+
+  .grid.list .cover .badge.plat { display: none; }
+
+  .grid.list .body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px 12px;
+  }
+
+  .grid.list .title {
+    min-height: 0;
+    -webkit-line-clamp: 1;
+  }
+
+  .viewtoggle {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel);
+  }
+
+  .viewtoggle button {
+    height: 24px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .viewtoggle button:hover { color: var(--text); }
+
+  .viewtoggle button.active {
+    background: rgba(255, 107, 157, 0.16);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+
+  /* 看板视图：想看 / 在看 / 看完 / 弃番 四列 */
+  .grid.board { display: block; }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .board-col {
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    min-height: 140px;
+  }
+
+  .board-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 0 9px;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .board-head span { font-size: 11.5px; color: var(--muted-2); font-weight: 400; }
+
+  .board-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .board-list .card { display: flex; align-items: stretch; }
+
+  .board-list .cover {
+    flex: 0 0 56px;
+    width: 56px;
+    aspect-ratio: auto;
+    min-height: 74px;
+  }
+
+  .board-list .cover img { height: 100%; }
+  .board-list .cover .badge.plat { display: none; }
+
+  .board-list .body {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+  }
+
+  .board-list .title { min-height: 0; font-size: 12px; }
+
+  .board-empty {
+    padding: 10px 2px;
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+
+  /* 详情内相似推荐 */
+  .similar:empty { display: none; }
+
+  .similar { margin-top: 14px; }
+
+  .similar-head {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+
+  .similar-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .sim-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sim-card:hover { border-color: var(--line-strong); }
+
+  .sim-card span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sim-card .sim-title { font-size: 12px; font-weight: 600; }
+  .sim-card .sim-meta { font-size: 11px; color: var(--muted-2); }
+
+  @media (max-width: 900px) {
+    .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 640px) {
+    .board { grid-template-columns: 1fr; }
+  }
+
+  /* 我的番剧按季度分组的时间线 */
+  .grid.timeline { display: block; }
+
+  .tl-group + .tl-group { margin-top: 20px; }
+
+  .tl-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .tl-head span {
+    color: var(--muted-2);
+    font-size: 11.5px;
+    font-weight: 400;
+  }
+
+  .card {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    color: inherit;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+    font-family: inherit;
+  }
+
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: var(--line-strong);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+  }
+
+  .card.picked {
+    border-color: rgba(255, 107, 157, 0.85);
+    box-shadow: 0 0 0 1px rgba(255, 107, 157, 0.55) inset;
+  }
+
+  /* 键盘操作时的可见焦点环 */
+  :focus-visible {
+    outline: 2px solid #ffa8c6;
+    outline-offset: 2px;
+  }
+
+  .card:focus-visible {
+    border-color: rgba(255, 107, 157, 0.85);
+    box-shadow: 0 0 0 1px rgba(255, 107, 157, 0.55) inset, 0 0 0 3px rgba(255, 107, 157, 0.22);
+  }
+
+  .cover {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    background: #0b0d12;
+    overflow: hidden;
+  }
+
+  /* 图片未就绪时的微光占位，加载完成或失败后淡出 */
+  .cover::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, 0.06) 45%, transparent 65%);
+    background-size: 220% 100%;
+    animation: cover-shimmer 1.4s linear infinite;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+
+  .cover.loaded::before,
+  .cover.noimg::before { opacity: 0; animation: none; }
+
+  @keyframes cover-shimmer {
+    from { background-position: 220% 0; }
+    to { background-position: -220% 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cover::before { animation: none; }
+  }
+
+  .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: transform 0.35s, opacity 0.3s;
+  }
+
+  .cover.loaded img { opacity: 1; }
+
+  .card:hover .cover img { transform: scale(1.05); }
+
+  .cover.noimg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #394052;
+    font-size: 12px;
+    background: linear-gradient(160deg, #151a24, #0d1017);
+  }
+
+  /* 无封面时用番名首字占位，离线或封面失效时也能快速辨认条目 */
+  .cover .ph {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    place-items: center;
+    color: #4a5366;
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    pointer-events: none;
+  }
+
+  .cover.noimg .ph { display: grid; }
+
+  .badge {
+    position: absolute;
+    z-index: 2;
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 6px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .score {
+    top: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.62);
+    color: var(--gold);
+    font-weight: 700;
+  }
+
+  .score.none { color: #8b93a7; font-weight: 500; }
+
+  .plat {
+    top: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #cfd6e6;
+  }
+
+  .tick {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--grad);
+    display: grid;
+    place-items: center;
+    font-size: 14px;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(255, 107, 157, 0.45);
+    opacity: 0;
+    transform: scale(0.5);
+    transition: 0.18s;
+  }
+
+  .card.picked .tick { opacity: 1; transform: scale(1); }
+
+  .body {
+    padding: 9px 10px 12px;
+  }
+
+  .title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    min-height: 2.7em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .title mark,
+  #modalTitle mark {
+    background: rgba(255, 107, 157, 0.30);
+    color: #fff;
+    border-radius: 3px;
+    padding: 0 1px;
+  }
+
+  /* 亮色主题：覆盖根变量与少量硬编码背景 */
+  html[data-theme="light"] {
+    --bg: #f5f6fb;
+    --panel: #ffffff;
+    --panel-2: #eef0f7;
+    --line: rgba(24, 28, 40, 0.10);
+    --line-strong: rgba(24, 28, 40, 0.22);
+    --text: #1b1f29;
+    --muted: #5c6478;
+    --muted-2: #7b8396;
+  }
+
+  html[data-theme="light"] body {
+    background-image:
+      radial-gradient(900px 500px at 12% -10%, rgba(255, 107, 157, 0.10), transparent 60%),
+      radial-gradient(800px 500px at 88% -20%, rgba(139, 123, 255, 0.12), transparent 60%);
+  }
+
+  html[data-theme="light"] header { background: rgba(245, 246, 251, 0.86); }
+  html[data-theme="light"] .continue-item { background: rgba(255, 255, 255, 0.72); }
+  html[data-theme="light"] .rcol.zero .rfill { background: #d9dde7; }
+  html[data-theme="light"] .sub { color: #6f7789; }
+  html[data-theme="light"] .modal-mask { background: rgba(20, 24, 35, 0.36); }
+  html[data-theme="light"] .cardmenu-opts button,
+  html[data-theme="light"] .cardmenu-detail { color: #2a3040; }
+  html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #c8cddb; }
+
+  .theme-toggle {
+    flex: 0 0 auto;
+    width: 38px;
+    padding: 0;
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  /* 键盘快捷键帮助 */
+  .help {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+
+  .help[hidden] { display: none; }
+
+  .help-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 7, 10, 0.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .help-panel {
+    position: relative;
+    width: min(360px, 100%);
+    padding: 20px;
+    border: 1px solid var(--line-strong);
+    border-radius: 16px;
+    background: var(--panel);
+  }
+
+  .help-panel h2 { margin: 0 0 14px; font-size: 15px; }
+
+  .help-panel ul {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .help-panel li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .help-panel li span { margin-left: auto; color: var(--text); }
+
+  .help-panel kbd {
+    display: inline-block;
+    min-width: 22px;
+    padding: 2px 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11.5px;
+    text-align: center;
+  }
+
+  .sub {
+    margin-top: 3px;
+    font-size: 11px;
+    color: #7d8599;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 1.3em;
+  }
+
+  .meta {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--muted-2);
+  }
+
+  /* 已看进度条：卡片上一眼看清追到哪了 */
+  .pbar {
+    margin-top: 6px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+
+  .pbar i {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #7c5cff, #ff6b9d);
+  }
+
+  html[data-theme="light"] .pbar { background: rgba(30, 34, 45, 0.12); }
+
+  /* 卡片上展示的个人备注，单行省略 */
+  .note {
+    margin-top: 4px;
+    padding: 3px 6px;
+    border-left: 2px solid rgba(255, 107, 157, 0.5);
+    border-radius: 0 5px 5px 0;
+    background: rgba(255, 107, 157, 0.07);
+    font-size: 11px;
+    color: #b7bfd0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loadmore {
+    display: flex;
+    justify-content: center;
+    padding: 18px 0 4px;
+  }
+
+  .loadmore[hidden] { display: none; }
+
+  .empty {
+    padding: 80px 20px;
+    text-align: center;
+    color: var(--muted-2);
+  }
+
+  .empty .btn { margin-top: 14px; }
+
+  .empty b {
+    display: block;
+    color: var(--muted);
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    /* 避开 iOS 底部小白条 */
+    bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    transform: translate(-50%, 20px);
+    background: rgba(30, 34, 45, 0.96);
+    border: 1px solid var(--line-strong);
+    color: var(--text);
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: 0.22s;
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  }
+
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* 回到顶部：长列表滚动后出现，移动端单手可达 */
+  .totop {
+    position: fixed;
+    right: max(20px, env(safe-area-inset-right, 0px));
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    z-index: 40;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    background: rgba(30, 34, 45, 0.94);
+    color: var(--text);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .totop[hidden] { display: none; }
+  .totop:hover { border-color: rgba(255, 107, 157, 0.55); }
+
+  html[data-theme="light"] .totop {
+    background: rgba(255, 255, 255, 0.96);
+    color: #2a3040;
+  }
+
+  @media (max-width: 640px) {
+    .totop {
+      right: max(14px, env(safe-area-inset-right, 0px));
+      width: 38px;
+      height: 38px;
+    }
+  }
+
+  footer {
+    padding: 30px 0 calc(40px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    color: var(--muted-2);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  .filter-toggle { display: none; }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 0 max(14px, env(safe-area-inset-right, 0px)) 0 max(14px, env(safe-area-inset-left, 0px)); }
+    .topbar { gap: 10px; }
+    h1 { font-size: 17px; }
+    .search { order: 3; flex-basis: 100%; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 12px; }
+    .title { font-size: 12.5px; }
+    .hint { display: none; }
+    /* 移动端筛选默认收起，避免首屏被筛选栏占满 */
+    .filter-toggle { display: inline-flex; align-items: center; height: 32px; }
+    .filters .row2 { display: none; }
+    .filters.expanded .row2 {
+      display: flex;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .filters.expanded .row2::-webkit-scrollbar { display: none; }
+    .filters.expanded .row2 > * { flex: 0 0 auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>番剧库</h1>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-3.5-3.5"></path>
+        </svg>
+        <input id="search" type="search" placeholder="搜索番名（空格分隔多个关键词，-词 排除）" autocomplete="off" aria-label="搜索番名">
+        <div class="searchhist" id="searchHist" hidden></div>
+      </div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="all">全部番剧</button>
+        <button class="tab" data-tab="mine">我的番剧<span class="count" id="mineCount">0</span></button>
+      </nav>
+      <button class="btn theme-toggle" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题">☾</button>
+      <button class="btn theme-toggle" id="helpBtn" type="button" aria-label="键盘快捷键帮助" title="键盘快捷键">?</button>
+      <button class="btn filter-toggle" id="filterToggle" type="button" aria-expanded="false">筛选</button>
+    </div>
+
+    <div class="filters" id="filters">
+      <div class="years" id="years"></div>
+      <div class="row2">
+        <button class="pill nav" id="prevSeason" type="button" aria-label="上一季度">‹</button>
+        <div class="years" id="seasons" style="overflow: visible;"></div>
+        <button class="pill nav" id="nextSeason" type="button" aria-label="下一季度">›</button>
+        <button class="btn" id="nowSeasonBtn" type="button" title="回到当前年份与季度">本季</button>
+        <select id="platform">
+          <option value="all">全部类型</option>
+        </select>
+        <select id="region">
+          <option value="all">全部地区</option>
+        </select>
+        <select id="sort">
+          <option value="score">按评分</option>
+          <option value="heat">按热度</option>
+          <option value="date">按时间</option>
+          <option value="name">按名称</option>
+        </select>
+        <button class="btn" id="onlyMineBtn" type="button" aria-pressed="false" title="只显示已加入我的番剧的条目">只看已收藏</button>
+        <button class="btn" id="highScoreBtn" type="button" aria-pressed="false" title="只显示评分 8.0 及以上的番剧">高分 ≥8.0</button>
+        <button class="btn" id="hideMineBtn" type="button" aria-pressed="false" title="隐藏已加入我的番剧的条目，只看还没收藏的">隐藏已收藏</button>
+        <button class="btn" id="clearFiltersBtn" type="button" hidden title="清除平台、地区、状态与搜索等筛选条件">清除筛选</button>
+        <div class="viewtoggle" id="viewToggle">
+          <button data-view="grid" class="active" type="button">网格</button>
+          <button data-view="list" type="button">列表</button>
+        </div>
+        <button class="btn" id="copyViewBtn" type="button" title="复制包含当前筛选与视图的链接">复制视图链接</button>
+        <span class="spacer"></span>
+        <span class="hint" id="dataHint"></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="notice" id="storageWarn" hidden>
+    当前浏览器禁用了本地存储，加入的番剧只在本次打开期间有效。请切到「我的番剧」用「导出备份」保存结果。
+  </div>
+  <div class="minebar" id="minebar" hidden>
+    <div class="stat">收藏 <b id="statCount">0</b> 部</div>
+    <span class="spacer"></span>
+    <button class="btn" id="groupBtn">按季度分组</button>
+    <select id="groupBy" aria-label="分组方式" hidden>
+      <option value="air">按首播季度</option>
+      <option value="added">按加入年份</option>
+    </select>
+    <button class="btn" id="boardBtn">看板视图</button>
+    <select id="mineSort" aria-label="我的番剧排序">
+      <option value="recent">最近加入</option>
+      <option value="name">名称</option>
+      <option value="date">首播时间</option>
+    </select>
+    <button class="btn" id="exportBtn">导出 JSON</button>
+    <button class="btn" id="exportCsv">导出 CSV</button>
+    <button class="btn" id="exportMd">导出 Markdown</button>
+    <button class="btn" id="importBtn">导入备份</button>
+    <button class="btn danger" id="clearBtn">清空</button>
+    <span class="backup-hint" id="backupHint" hidden></span>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+  </div>
+
+  <div class="statusrow" id="statusRow" hidden></div>
+
+  <div class="resultbar" id="resultbar"></div>
+  <div class="grid" id="grid"></div>
+  <div class="loadmore" id="loadMore" hidden><button class="btn" id="loadMoreBtn" type="button">显示更多</button></div>
+  <div class="empty" id="empty" hidden></div>
+</main>
+
+<footer class="wrap">
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.0.0</span>
+</footer>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-mask"></div>
+  <div class="modal-panel detail-panel" role="dialog" aria-modal="true">
+    <div class="detail-cover" id="detailCover"></div>
+    <div class="detail-main">
+      <h2 id="modalTitle"></h2>
+      <p class="modal-sub" id="modalSub"></p>
+      <div class="detail-nav" id="detailNav" hidden>
+        <button class="btn" id="detailPrev" type="button">‹ 上一部</button>
+        <button class="btn" id="detailNext" type="button">下一部 ›</button>
+      </div>
+      <div class="detail-meta" id="detailMeta"></div>
+      <div class="status-opts" id="statusOpts" hidden></div>
+      <div class="similar" id="detailSimilar"></div>
+      <div class="modal-actions">
+        <button class="btn primary" id="detailToggle">加入我的番剧</button>
+        <button class="btn" id="detailShare" type="button">复制链接</button>
+        <a class="btn" id="detailLink" target="_blank" rel="noreferrer">Bangumi</a>
+        <button class="btn" id="modalClose">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cardmenu" id="cardMenu" hidden>
+  <div class="cardmenu-title" id="cardMenuTitle"></div>
+  <div class="cardmenu-opts" id="cardMenuOpts"></div>
+  <button class="cardmenu-detail" type="button" data-act="detail">查看详情</button>
+  <button class="cardmenu-detail" type="button" id="cardMenuRemove" data-act="remove" hidden>移出我的番剧</button>
+</div>
+
+<div class="help" id="help" hidden>
+  <div class="help-mask"></div>
+  <div class="help-panel" role="dialog" aria-modal="true" aria-label="键盘快捷键">
+    <h2>键盘快捷键</h2>
+    <ul>
+      <li><kbd>/</kbd><span>聚焦搜索框</span></li>
+      <li><kbd>←</kbd><kbd>→</kbd><span>切换季度；详情内切换上一部 / 下一部</span></li>
+      <li><kbd>↑</kbd><kbd>↓</kbd><span>在卡片间移动焦点</span></li>
+      <li><kbd>Enter</kbd><span>打开当前聚焦的番剧</span></li>
+      <li><kbd>T</kbd><span>切换明暗主题</span></li>
+      <li><kbd>Esc</kbd><span>关闭详情或本帮助</span></li>
+      <li><kbd>?</kbd><span>打开 / 关闭本帮助</span></li>
+      <li><kbd>长按</kbd><span>快速修改追番状态</span></li>
+    </ul>
+    <button class="btn primary" id="helpClose" type="button">知道了</button>
+  </div>
+</div>
+
+<button class="totop" id="toTop" type="button" aria-label="回到顶部" title="回到顶部" hidden>↑</button>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="data/anime-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var DATA = (window.ANIME_DATA || []).filter(function (x) { return x.d; });
+  var META = window.ANIME_META || {};
+  var byId = new Map(DATA.map(function (x) { return [String(x.i), x]; }));
+  var STORAGE_KEY = 'yuc_my_anime_v1';
+  var PREFS_KEY = 'yuc_prefs_v1';
+  var HIST_KEY = 'yuc_search_hist_v1';
+  var BACKUP_KEY = 'yuc_backup_v1';
+  var HIST_MAX = 8;
+  var SEASON_OF_MONTH = { 1: 1, 2: 1, 3: 1, 4: 4, 5: 4, 6: 4, 7: 7, 8: 7, 9: 7, 10: 10, 11: 10, 12: 10 };
+  var STATUS = { want: '想看', doing: '在看', done: '看完', drop: '弃番' };
+  var STATUS_ORDER = ['want', 'doing', 'done', 'drop'];
+
+  var now = new Date();
+  var state = {
+    tab: 'all',
+    year: String(META.endYear || now.getFullYear()),
+    season: String(SEASON_OF_MONTH[now.getMonth() + 1] || 1),
+    platform: 'all',
+    region: 'all',
+    sort: 'score',
+    status: 'all',
+    onlyMine: false,
+    highScore: false,
+    hideMine: false,
+    view: 'grid',
+    group: false,
+    groupBy: 'air',
+    mineSort: 'recent',
+    theme: 'dark',
+    q: ''
+  };
+
+  var myMap = loadMine();
+  // 探测本地存储是否可用，不可用时给出常驻提示
+  var canStore = (function () {
+    try {
+      var probe = '__yuc_probe__';
+      localStorage.setItem(probe, '1');
+      localStorage.removeItem(probe);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })();
+  var $ = function (id) { return document.getElementById(id); };
+  var searchEl = $('search');
+  var gridEl = $('grid');
+  // 分批渲染：首屏最多 240 张，其余按需追加，避免一次性插入近万节点
+  var PAGE_SIZE = 240;
+
+  function updateLoadMore(total, shown, paged) {
+    var rest = paged && total > shown ? total - shown : 0;
+    $('loadMore').hidden = !rest;
+    if (rest) $('loadMoreBtn').textContent = '还有 ' + rest + ' 部 · 显示更多';
+  }
+  var emptyEl = $('empty');
+  var toastEl = $('toast');
+  var toastTimer = null;
+
+  // 兼容旧版数据：数字表示加入时间，视为「看完」；进度/评分/备注字段已随功能移除
+  function normalizeEntry(v) {
+    if (v == null) return null;
+    if (typeof v === 'object') {
+      return {
+        s: STATUS[v.s] ? v.s : 'done',
+        t: Number(v.t) || Date.now()
+      };
+    }
+    return { s: 'done', t: Number(v) || Date.now() };
+  }
+
+  function loadMine() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {};
+      var out = {};
+      Object.keys(parsed).forEach(function (id) {
+        var entry = normalizeEntry(parsed[id]);
+        if (entry) out[id] = entry;
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveMine() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
+      return true;
+    } catch (e) {
+      toast('浏览器禁止本地存储，请及时导出备份');
+      return false;
+    }
+  }
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 1800);
+  }
+
+  // ---- 备份提示：有收藏时提示是否导出过，导出后记录时间 ----
+  function backupAt() {
+    if (!canStore) return 0;
+    try {
+      return Number(localStorage.getItem(BACKUP_KEY)) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function renderBackupHint() {
+    var el = $('backupHint');
+    if (!el) return;
+    if (!Object.keys(myMap).length) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    el.hidden = false;
+    var at = backupAt();
+    if (!at) {
+      el.textContent = '尚未备份';
+      el.title = '建议导出一次 JSON 备份，防止浏览器清理或换设备时丢失记录';
+      return;
+    }
+    var d = new Date(at);
+    el.textContent = '上次备份 ' + (d.getMonth() + 1) + '/' + d.getDate();
+    el.title = '上次导出备份：' + d.toLocaleString('zh-CN');
+  }
+
+  function markBackup() {
+    if (!canStore) return;
+    try {
+      localStorage.setItem(BACKUP_KEY, String(Date.now()));
+    } catch (e) { /* 忽略存储失败 */ }
+    renderBackupHint();
+  }
+
+  // ---- URL hash 状态：刷新、分享后都能还原筛选条件 ----
+  var applyingHash = false;
+
+  function parseHash() {
+    var raw = String(location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    var map = {};
+    raw.split('&').forEach(function (pair) {
+      if (!pair) return;
+      var i = pair.indexOf('=');
+      var key = i < 0 ? pair : pair.slice(0, i);
+      var val = i < 0 ? '' : pair.slice(i + 1);
+      try {
+        map[decodeURIComponent(key)] = decodeURIComponent(val.replace(/\+/g, ' '));
+      } catch (e) { /* 忽略非法转义 */ }
+    });
+    return map;
+  }
+
+  function applyStateMap(map) {
+    if (!map) return false;
+    var start = META.startYear || 1990;
+    var end = META.endYear || now.getFullYear();
+    var platforms = {};
+    var regions = {};
+    DATA.forEach(function (x) {
+      platforms[x.p || ''] = 1;
+      regions[x.g || ''] = 1;
+    });
+    if (map.tab === 'all' || map.tab === 'mine') state.tab = map.tab;
+    var y = parseInt(map.y, 10);
+    if (map.y === 'all') state.year = 'all';
+    else if (y >= start && y <= end) state.year = String(y);
+    if (['all', '1', '4', '7', '10'].indexOf(map.s) >= 0) state.season = map.s;
+    if (map.f === 'all' || platforms[map.f]) state.platform = map.f;
+    if (map.r === 'all' || regions[map.r]) state.region = map.r;
+    if (['score', 'heat', 'date', 'name'].indexOf(map.o) >= 0) state.sort = map.o;
+    if (['all'].concat(STATUS_ORDER).indexOf(map.st) >= 0) state.status = map.st;
+    if (map.om === '1' || map.om === '0' || typeof map.om === 'boolean') {
+      state.onlyMine = map.om === '1' || map.om === true;
+    }
+    if (map.hs === '1' || map.hs === '0' || typeof map.hs === 'boolean') {
+      state.highScore = map.hs === '1' || map.hs === true;
+    }
+    if (map.hm === '1' || map.hm === '0' || typeof map.hm === 'boolean') {
+      state.hideMine = map.hm === '1' || map.hm === true;
+    }
+    if (map.v === 'grid' || map.v === 'list' || map.v === 'board') state.view = map.v;
+    if (['recent', 'name', 'date'].indexOf(map.ms) >= 0) state.mineSort = map.ms;
+    if (map.gb === 'air' || map.gb === 'added') {
+      state.group = true;
+      state.groupBy = map.gb;
+    }
+    if (map.t === 'light' || map.t === 'dark') state.theme = map.t;
+    if (typeof map.q === 'string') state.q = map.q;
+    return true;
+  }
+
+  function applyHash() {
+    return applyStateMap(parseHash());
+  }
+
+  // 深链：hash 中的 d 参数指向要直接打开的番剧详情
+  function hashDetail() {
+    var map = parseHash();
+    return map && map.d && byId.has(String(map.d)) ? String(map.d) : null;
+  }
+
+  // 记住上次的浏览偏好，直接打开页面（无 hash）时沿用
+  function loadPrefs() {
+    if (!canStore) return null;
+    try {
+      return JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function savePrefs() {
+    if (!canStore) return;
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({
+        tab: state.tab,
+        y: state.year,
+        s: state.season,
+        f: state.platform,
+        r: state.region,
+        o: state.sort,
+        st: state.status,
+        om: state.onlyMine,
+        hs: state.highScore,
+        hm: state.hideMine,
+        v: state.view,
+        ms: state.mineSort,
+        gb: state.group ? state.groupBy : '',
+        t: state.theme
+      }));
+    } catch (e) { /* 存储失败不影响浏览 */ }
+  }
+
+  // ---- 搜索历史：最多保留 8 条，去重且最近使用排前 ----
+  var searchHist = loadHist();
+  var histIndex = -1;
+
+  function loadHist() {
+    if (!canStore) return [];
+    try {
+      var arr = JSON.parse(localStorage.getItem(HIST_KEY) || '[]');
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(function (x) { return typeof x === 'string' && x.trim(); })
+        .slice(0, HIST_MAX);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveHist() {
+    if (!canStore) return;
+    try {
+      localStorage.setItem(HIST_KEY, JSON.stringify(searchHist));
+    } catch (e) { /* 忽略存储失败 */ }
+  }
+
+  function pushHist(q) {
+    q = String(q == null ? '' : q).trim();
+    if (!q) return;
+    searchHist = [q].concat(searchHist.filter(function (x) { return x !== q; }))
+      .slice(0, HIST_MAX);
+    saveHist();
+    renderHist();
+  }
+
+  function renderHist() {
+    var box = $('searchHist');
+    if (!box) return;
+    var open = searchHist.length > 0 &&
+      document.activeElement === searchEl &&
+      !searchEl.value.trim();
+    box.hidden = !open;
+    if (!open) { histIndex = -1; return; }
+    if (histIndex >= searchHist.length) histIndex = -1;
+    var html = '<span class="hlabel">最近搜索</span>';
+    html += searchHist.map(function (q, i) {
+      return '<span class="hitem"><button class="hchip' + (i === histIndex ? ' active' : '') +
+        '" type="button" data-q="' +
+        escapeHtml(q) + '">' + escapeHtml(q) + '</button>' +
+        '<button class="hdel" type="button" data-del="' + escapeHtml(q) +
+        '" aria-label="删除这条搜索历史" title="删除">×</button></span>';
+    }).join('');
+    html += '<button class="hclear" type="button">清除历史</button>';
+    box.innerHTML = html;
+  }
+
+  // 选用一条历史词：回填输入框并立即搜索
+  function applyHistQuery(q) {
+    histIndex = -1;
+    searchEl.value = q;
+    state.q = q;
+    render();
+    searchEl.focus();
+    renderHist();
+  }
+
+  // ---- 最近浏览已移除，仅保留详情导航 ----
+
+  function writeHash() {
+    var parts = [
+      'tab=' + encodeURIComponent(state.tab),
+      'y=' + encodeURIComponent(state.year),
+      's=' + encodeURIComponent(state.season),
+      'f=' + encodeURIComponent(state.platform),
+      'r=' + encodeURIComponent(state.region),
+      'o=' + encodeURIComponent(state.sort),
+      'st=' + encodeURIComponent(state.status),
+      'om=' + (state.onlyMine ? '1' : '0'),
+      'hs=' + (state.highScore ? '1' : '0'),
+      'hm=' + (state.hideMine ? '1' : '0'),
+      'v=' + encodeURIComponent(state.view),
+      'ms=' + encodeURIComponent(state.mineSort),
+      't=' + encodeURIComponent(state.theme)
+    ];
+    if (state.q.trim()) parts.push('q=' + encodeURIComponent(state.q.trim()));
+    if (state.group) parts.push('gb=' + encodeURIComponent(state.groupBy));
+    if (modalId) parts.push('d=' + encodeURIComponent(modalId));
+    var next = '#' + parts.join('&');
+    if (location.hash !== next) {
+      try {
+        history.replaceState(null, '', next);
+      } catch (e) {
+        location.hash = next;
+      }
+    }
+  }
+
+  // 跟随系统配色：浅色系统返回 light，其余（含不支持 matchMedia）回退 dark
+  function systemTheme() {
+    try {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        return 'light';
+      }
+    } catch (e) { /* 忽略查询失败 */ }
+    return 'dark';
+  }
+
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', state.theme);
+    var btn = $('themeBtn');
+    if (btn) {
+      btn.textContent = state.theme === 'light' ? '☀' : '☾';
+      btn.setAttribute('aria-pressed', state.theme === 'light' ? 'true' : 'false');
+      btn.title = state.theme === 'light' ? '切换到暗色' : '切换到亮色';
+    }
+  }
+
+  // 把 state 同步回所有控件，避免从 hash 恢复后控件与结果不一致
+  function syncControls() {
+    searchEl.value = state.q;
+    $('platform').value = state.platform;
+    $('region').value = state.region;
+    $('sort').value = state.sort;
+    $('mineSort').value = state.mineSort;
+    var groupBtn = $('groupBtn');
+    if (groupBtn) {
+      groupBtn.textContent = state.group ? '取消分组' : '按季度分组';
+      groupBtn.classList.toggle('primary', !!state.group);
+    }
+    var groupBy = $('groupBy');
+    if (groupBy) {
+      groupBy.hidden = !state.group;
+      groupBy.value = state.groupBy;
+    }
+    var onlyMineBtn = $('onlyMineBtn');
+    if (onlyMineBtn) {
+      onlyMineBtn.setAttribute('aria-pressed', state.onlyMine ? 'true' : 'false');
+      onlyMineBtn.classList.toggle('primary', state.onlyMine);
+    }
+    var highScoreBtn = $('highScoreBtn');
+    if (highScoreBtn) {
+      highScoreBtn.setAttribute('aria-pressed', state.highScore ? 'true' : 'false');
+      highScoreBtn.classList.toggle('primary', state.highScore);
+    }
+    var hideMineBtn = $('hideMineBtn');
+    if (hideMineBtn) {
+      hideMineBtn.setAttribute('aria-pressed', state.hideMine ? 'true' : 'false');
+      hideMineBtn.classList.toggle('primary', state.hideMine);
+    }
+    document.querySelectorAll('.tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === state.tab);
+    });
+    document.querySelectorAll('#viewToggle [data-view]').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.view === state.view);
+    });
+    renderYears();
+    renderSeasons();
+    applyTheme();
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // 标题关键词高亮：按原文分段再逐段转义，避免标签注入；整串命中时整体高亮，否则按多个关键词分别高亮并合并重叠区间
+  function highlightHtml(str, q) {
+    var raw = String(str == null ? '' : str);
+    var needle = String(q == null ? '' : q).trim();
+    if (!needle) return escapeHtml(raw);
+    var lower = raw.toLowerCase();
+    var target = needle.toLowerCase();
+    var ranges = [];
+    var whole = lower.indexOf(target);
+    if (whole >= 0) {
+      // 整串命中优先保持为一个高亮块（如直接粘贴完整番名搜索）
+      while (whole >= 0) {
+        ranges.push([whole, whole + target.length]);
+        whole = lower.indexOf(target, whole + 1);
+      }
+    } else {
+      searchTokens(target)
+        .filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; })
+        .forEach(function (t) {
+          var idx = lower.indexOf(t);
+          while (idx >= 0) {
+            ranges.push([idx, idx + t.length]);
+            idx = lower.indexOf(t, idx + 1);
+          }
+        });
+    }
+    if (!ranges.length) return escapeHtml(raw);
+    ranges.sort(function (a, b) { return a[0] - b[0] || b[1] - a[1]; });
+    var merged = [];
+    ranges.forEach(function (r) {
+      var last = merged[merged.length - 1];
+      if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+      else merged.push([r[0], r[1]]);
+    });
+    var out = '';
+    var pos = 0;
+    merged.forEach(function (r) {
+      out += escapeHtml(raw.slice(pos, r[0])) +
+        '<mark>' + escapeHtml(raw.slice(r[0], r[1])) + '</mark>';
+      pos = r[1];
+    });
+    return out + escapeHtml(raw.slice(pos));
+  }
+
+  function quarterOf(dateStr) {
+    var m = parseInt(String(dateStr).slice(5, 7), 10);
+    return SEASON_OF_MONTH[m] || 0;
+  }
+
+  function yearOf(dateStr) {
+    return String(dateStr).slice(0, 4);
+  }
+
+  function renderYears() {
+    var start = META.startYear || 1990;
+    var end = META.endYear || now.getFullYear();
+    // 「全部」不限制年份，配合分页按评分/热度翻看全库，便于发现老番
+    var html = '<button class="pill' + (state.year === 'all' ? ' active' : '') +
+      '" data-year="all" title="不限年份，浏览全部番剧">全部</button>';
+    for (var y = end; y >= start; y -= 1) {
+      html += '<button class="pill' + (String(y) === state.year ? ' active' : '') + '" data-year="' + y + '">' + y + '</button>';
+    }
+    $('years').innerHTML = html;
+  }
+
+  function renderSeasons() {
+    var seasons = [['all', '全年'], ['1', '1月'], ['4', '4月'], ['7', '7月'], ['10', '10月']];
+    $('seasons').innerHTML = seasons.map(function (s) {
+      return '<button class="pill' + (s[0] === state.season ? ' active' : '') + '" data-season="' + s[0] + '">' + s[1] + '</button>';
+    }).join('');
+  }
+
+  // 季度前后切换：跨年自动进位/退位，范围限制在数据年份内
+  function shiftQuarter(delta) {
+    var seq = ['1', '4', '7', '10'];
+    var start = META.startYear || 1990;
+    var end = META.endYear || now.getFullYear();
+    var year = parseInt(state.year, 10) || end;
+    var idx = seq.indexOf(state.season);
+    if (idx < 0) {
+      if (delta < 0) { year -= 1; idx = 3; } else { idx = 0; }
+    } else {
+      idx += delta;
+      if (idx > 3) { idx = 0; year += 1; }
+      if (idx < 0) { idx = 3; year -= 1; }
+    }
+    if (year < start || year > end) return;
+    state.year = String(year);
+    state.season = seq[idx];
+    renderYears();
+    renderSeasons();
+    render();
+  }
+
+  // 当前年份与季度，超出数据范围时收敛到边界
+  function currentPeriod() {
+    var start = META.startYear || 1990;
+    var end = META.endYear || now.getFullYear();
+    var year = now.getFullYear();
+    var season = String(SEASON_OF_MONTH[now.getMonth() + 1] || 1);
+    if (year > end) { year = end; season = '10'; }
+    if (year < start) { year = start; season = '1'; }
+    return { y: String(year), s: season };
+  }
+
+  // 一键回到本季：从久远年份跳回当前季度
+  function goNowSeason() {
+    var p = currentPeriod();
+    if (state.year === p.y && state.season === p.s) {
+      toast('已经在当前季度');
+      return;
+    }
+    state.year = p.y;
+    state.season = p.s;
+    renderYears();
+    renderSeasons();
+    render();
+    toast('已回到本季');
+  }
+
+  // 我的番剧按状态分组统计
+  function renderStatusRow() {
+    var counts = { all: 0, want: 0, doing: 0, done: 0, drop: 0 };
+    Object.keys(myMap).forEach(function (id) {
+      var e = myMap[id];
+      counts.all += 1;
+      if (e && counts[e.s] != null) counts[e.s] += 1;
+    });
+    var groups = [['all', '全部']].concat(STATUS_ORDER.map(function (k) { return [k, STATUS[k]]; }));
+    $('statusRow').innerHTML = groups.map(function (g) {
+      return '<button class="pill' + (state.status === g[0] ? ' active' : '') + '" data-status="' + g[0] + '">' +
+        g[1] + '<span class="n">' + counts[g[0]] + '</span></button>';
+    }).join('');
+  }
+
+  // 根据实际数据生成筛选项，避免遗漏「其他」「动态漫画」等平台值
+  function fillSelect(select, counts, allLabel) {
+    var keys = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    var html = '<option value="all">' + allLabel + '</option>';
+    keys.forEach(function (key) {
+      html += '<option value="' + escapeHtml(key) + '">' + escapeHtml(key || '未标注') +
+        ' (' + counts[key] + ')</option>';
+    });
+    select.innerHTML = html;
+  }
+
+  function fillFilterOptions() {
+    var platformCounts = {};
+    var regionCounts = {};
+    DATA.forEach(function (x) {
+      var p = x.p || '';
+      var g = x.g || '';
+      platformCounts[p] = (platformCounts[p] || 0) + 1;
+      regionCounts[g] = (regionCounts[g] || 0) + 1;
+    });
+    fillSelect($('platform'), platformCounts, '全部类型');
+    fillSelect($('region'), regionCounts, '全部地区');
+  }
+
+  function baseList() {
+    if (state.tab === 'mine') {
+      return DATA.filter(function (x) { return myMap[String(x.i)]; });
+    }
+    return DATA;
+  }
+
+  // 搜索分词：按空白拆分，多个关键词取交集（AND），便于用「作品名 + 季数」缩小范围
+  function searchTokens(q) {
+    return String(q == null ? '' : q).trim().toLowerCase().split(/\s+/)
+      .filter(function (t) { return t; });
+  }
+
+  // 搜索相关度：0 完全一致 > 1 前缀 > 2 包含，越靠前越优先
+  function searchRank(x, q) {
+    var cn = String(x.cn || '').toLowerCase();
+    var n = String(x.n || '').toLowerCase();
+    var fields = [cn, n];
+    var best = 3;
+    fields.forEach(function (f) {
+      if (!f) return;
+      if (f === q) best = Math.min(best, 0);
+      else if (f.indexOf(q) === 0) best = Math.min(best, 1);
+      else if (f.indexOf(q) >= 0) best = Math.min(best, 2);
+    });
+    // 多关键词时整串通常不会命中，退而用首个关键词的匹配档位排序
+    var tokens = searchTokens(q).filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
+    if (best === 3 && tokens.length > 1) {
+      var head = tokens[0];
+      fields.forEach(function (f) {
+        if (!f) return;
+        if (f.indexOf(head) === 0) best = Math.min(best, 1);
+        else if (f.indexOf(head) >= 0) best = Math.min(best, 2);
+      });
+    }
+    return best;
+  }
+
+  function filteredList() {
+    var list = baseList();
+    var q = state.q.trim().toLowerCase();
+    var allTokens = searchTokens(q);
+    // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合
+    var tokens = allTokens.filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
+    var excludes = allTokens.filter(function (t) { return t.charAt(0) === '-' && t.length > 1; })
+      .map(function (t) { return t.slice(1); });
+
+    if (tokens.length || excludes.length) {
+      if (tokens.length) {
+        list = list.filter(function (x) {
+          var cn = String(x.cn || '').toLowerCase();
+          var n = String(x.n || '').toLowerCase();
+          return tokens.every(function (t) {
+            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0;
+          });
+        });
+      }
+      if (excludes.length) {
+        list = list.filter(function (x) {
+          var cn = String(x.cn || '').toLowerCase();
+          var n = String(x.n || '').toLowerCase();
+          return !excludes.some(function (t) {
+            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0;
+          });
+        });
+      }
+    } else if (state.tab === 'all') {
+      if (state.year !== 'all') {
+        list = list.filter(function (x) { return yearOf(x.d) === state.year; });
+      }
+      if (state.season !== 'all') {
+        list = list.filter(function (x) { return String(quarterOf(x.d)) === state.season; });
+      }
+    }
+
+    // 平台/地区筛选只在全部番剧页可见，切到我的番剧时不应暗中影响结果
+    if (state.tab === 'all' && state.platform !== 'all') {
+      list = list.filter(function (x) { return x.p === state.platform; });
+    }
+
+    if (state.tab === 'all' && state.region === 'other') {
+      list = list.filter(function (x) { return x.g !== '日本' && x.g !== '中国'; });
+    } else if (state.tab === 'all' && state.region !== 'all') {
+      list = list.filter(function (x) { return x.g === state.region; });
+    }
+
+    // 只看已收藏：在全部番剧/搜索里快速收窄到个人清单
+    if (state.onlyMine) {
+      list = list.filter(function (x) { return !!myMap[String(x.i)]; });
+    }
+
+    // 隐藏已收藏：发现新番时排除自己的清单，与「只看已收藏」互斥
+    if (state.hideMine && state.tab === 'all') {
+      list = list.filter(function (x) { return !myMap[String(x.i)]; });
+    }
+
+    // 只看高分：全库浏览时收窄到 8.0 分以上，便于发现口碑作
+    if (state.highScore && state.tab === 'all') {
+      list = list.filter(function (x) { return (Number(x.s) || 0) >= 8; });
+    }
+
+    // 追番状态过滤：我的番剧常驻；全库搜索时也可按状态缩小范围
+    if (state.status !== 'all' && (state.tab === 'mine' || q)) {
+      list = list.filter(function (x) {
+        var entry = myMap[String(x.i)];
+        return entry && entry.s === state.status;
+      });
+    }
+
+    // 搜索结果按相关度优先，同档再按评分/热度，避免长名条目被淹没
+    if (q) {
+      return list.slice().sort(function (a, b) {
+        return searchRank(a, q) - searchRank(b, q) ||
+          (b.s || 0) - (a.s || 0) ||
+          (b.h || 0) - (a.h || 0);
+      });
+    }
+
+    return sortList(list);
+  }
+
+  function sortList(list) {
+    var copy = list.slice();
+    if (state.tab === 'mine') {
+      var mineSort = state.mineSort || 'recent';
+      return copy.sort(function (a, b) {
+        var ea = myMap[String(a.i)] || {};
+        var eb = myMap[String(b.i)] || {};
+        if (mineSort === 'name') {
+          return String(a.cn || a.n).localeCompare(String(b.cn || b.n), 'zh');
+        }
+        if (mineSort === 'date') {
+          return String(a.d).localeCompare(String(b.d)) || (eb.t || 0) - (ea.t || 0);
+        }
+        return (eb.t || 0) - (ea.t || 0);
+      });
+    }
+    switch (state.sort) {
+      case 'heat':
+        return copy.sort(function (a, b) { return (b.h || 0) - (a.h || 0); });
+      case 'date':
+        return copy.sort(function (a, b) { return String(a.d).localeCompare(String(b.d)); });
+      case 'name':
+        return copy.sort(function (a, b) { return String(a.cn || a.n).localeCompare(String(b.cn || b.n), 'zh'); });
+      default:
+        return copy.sort(function (a, b) {
+          return (b.s || 0) - (a.s || 0) || (b.h || 0) - (a.h || 0);
+        });
+    }
+  }
+
+  // 封面双档 srcset：普通屏取 200 宽小图，高分屏取 400 宽，减少首屏流量
+  function coverSrcset(url) {
+    if (!url || url.indexOf('/r/400/') < 0) return '';
+    return escapeHtml(url.replace('/r/400/', '/r/200/')) + ' 200w, ' + escapeHtml(url) + ' 400w';
+  }
+
+  function cardHtml(x) {
+    var id = String(x.i);
+    var picked = !!myMap[id];
+    var q = state.q.trim();
+    var titleText = x.cn || x.n || '未知番剧';
+    // 无封面时以番名首字占位（跳过开头的括号/引号），便于离线或封面失效时辨认
+    var initial = String(titleText).replace(/^[\s「『《【(（"'“]+/, '').charAt(0) || '?';
+    var title = highlightHtml(titleText, q);
+    var sub = x.cn && x.n && x.cn !== x.n ? highlightHtml(x.n, q) : '';
+    var score = x.s ? Number(x.s).toFixed(1) : '';
+    var meta = [x.d, x.e ? x.e + '话' : ''].filter(Boolean).join(' · ');
+
+    return '<button class="card' + (picked ? ' picked' : '') + '" data-id="' + id + '" aria-pressed="' + picked + '" title="' + escapeHtml(titleText) + '">' +
+      '<div class="cover' + (x.img ? '' : ' noimg') + '">' +
+        (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
+          (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
+          ' alt="" onload="this.parentElement.classList.add(\'loaded\')" onerror="this.style.display=\'none\';this.parentElement.classList.add(\'noimg\')">' : '') +
+        '<span class="ph">' + escapeHtml(initial) + '</span>' +
+        (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +
+        (x.p ? '<span class="badge plat">' + escapeHtml(x.p) + '</span>' : '') +
+        (myMap[id]
+          ? '<span class="badge status">' + escapeHtml(STATUS[myMap[id].s] || '看完') + '</span>'
+          : '') +
+        '<span class="tick">✓</span>' +
+      '</div>' +
+      '<div class="body">' +
+        '<div class="title">' + title + '</div>' +
+        '<div class="sub">' + sub + '</div>' +
+        '<div class="meta">' + escapeHtml(meta) + '</div>' +
+      '</div>' +
+    '</button>';
+  }
+
+  // 按年份季度分组，便于回顾「什么时候追了什么」；可切换按首播季度或按加入年份
+  function timelineHtml(list) {
+    var byAdded = state.groupBy === 'added';
+    var groups = {};
+    list.forEach(function (x) {
+      var key;
+      if (byAdded) {
+        var entry = myMap[String(x.i)];
+        var joined = entry && entry.t ? new Date(entry.t).getFullYear() : 0;
+        key = joined ? String(joined) : '0000';
+      } else {
+        key = yearOf(x.d) + '-' + quarterOf(x.d);
+      }
+      (groups[key] = groups[key] || []).push(x);
+    });
+    return Object.keys(groups).sort().reverse().map(function (key) {
+      var parts = key.split('-');
+      var season = Number(parts[1]);
+      var label = byAdded
+        ? (Number(parts[0]) ? parts[0] + ' 年加入' : '加入时间未知')
+        : parts[0] + ' 年 ' + (season ? season + ' 月' : '档期未知');
+      return '<section class="tl-group"><h3 class="tl-head">' + label +
+        '<span>' + groups[key].length + ' 部</span></h3>' +
+        '<div class="grid">' + groups[key].map(cardHtml).join('') + '</div></section>';
+    }).join('');
+  }
+
+  // 看板：按收藏状态分四列，快速看清进度分布
+  function boardHtml(list) {
+    if (!list.length) return '';
+    var cols = STATUS_ORDER.map(function (s) {
+      var items = list.filter(function (x) {
+        var entry = myMap[String(x.i)];
+        return entry && entry.s === s;
+      });
+      return '<section class="board-col" data-status="' + s + '">' +
+        '<h3 class="board-head"><b>' + STATUS[s] + '</b><span>' + items.length + '</span></h3>' +
+        '<div class="board-list">' +
+        (items.length ? items.map(cardHtml).join('') : '<div class="board-empty">暂无</div>') +
+        '</div></section>';
+    });
+    return '<div class="board">' + cols.join('') + '</div>';
+  }
+
+  function render() {
+    var list = filteredList();
+    $('mineCount').textContent = Object.keys(myMap).length;
+    $('minebar').hidden = state.tab !== 'mine';
+    $('filters').style.display = state.tab === 'mine' ? 'none' : 'flex';
+    $('filterToggle').style.display = state.tab === 'mine' ? 'none' : '';
+    var activeFilters = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
+      (state.sort !== 'score' ? 1 : 0) + (state.view !== 'grid' ? 1 : 0) +
+      (state.onlyMine ? 1 : 0) + (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0);
+    $('filterToggle').textContent = activeFilters ? '筛选 · ' + activeFilters : '筛选';
+    // 常驻「清除筛选」：有筛选条件时才出现，避免空结果时才找得到重置入口
+    var filterCount = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
+      (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
+      (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) + (state.q.trim() ? 1 : 0);
+    var clearFiltersBtn = $('clearFiltersBtn');
+    clearFiltersBtn.hidden = !filterCount;
+    clearFiltersBtn.textContent = filterCount > 1 ? '清除筛选 · ' + filterCount : '清除筛选';
+    renderBackupHint();
+    var searchStatus = state.tab === 'all' && !!state.q.trim();
+    $('statusRow').hidden = state.tab !== 'mine' && !searchStatus;
+    if (state.tab === 'mine' || searchStatus) renderStatusRow();
+
+    if (state.tab === 'mine') {
+      $('statCount').textContent = list.length;
+    }
+
+    var q = state.q.trim();
+    var label;
+    if (state.tab === 'mine') {
+      label = '<b>' + list.length + '</b><span>部已看番剧</span>';
+    } else if (q) {
+      label = '<b>' + list.length + '</b><span>条全库搜索结果</span>';
+    } else if (state.year === 'all') {
+      label = '<b>' + list.length + '</b><span>部 · 全部年份' +
+        (state.season === 'all' ? ' · 全年' : ' · ' + state.season + '月季') + '</span>';
+    } else {
+      label = '<b>' + list.length + '</b><span>部 · ' + state.year + '年' +
+        (state.season === 'all' ? '全年' : state.season + '月') + '</span>';
+    }
+    $('resultbar').innerHTML = label;
+
+    var board = state.tab === 'mine' && state.view === 'board';
+    $('boardBtn').textContent = board ? '网格视图' : '看板视图';
+    gridEl.className = 'grid' + (state.view === 'list' ? ' list' : '') +
+      (board ? ' board' : '') +
+      (state.tab === 'mine' && state.group && !board ? ' timeline' : '');
+    var grouped = state.tab === 'mine' && state.group && !board;
+    var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
+    gridEl.innerHTML = board
+      ? boardHtml(list)
+      : grouped
+        ? timelineHtml(shown)
+        : shown.map(cardHtml).join('');
+    // 首屏前 5 张封面优先加载，其余保持按需懒加载
+    var firstImgs = gridEl.querySelectorAll('.card img');
+    for (var bi = 0; bi < firstImgs.length && bi < 5; bi += 1) {
+      firstImgs[bi].setAttribute('loading', 'eager');
+      firstImgs[bi].setAttribute('fetchpriority', 'high');
+    }
+    updateLoadMore(list.length, shown.length, !grouped && !board);
+    emptyEl.hidden = list.length > 0;
+    if (!list.length) {
+      if (state.tab === 'mine') {
+        if (!Object.keys(myMap).length) {
+          emptyEl.innerHTML = '<b>还没有加入任何番剧</b>切换到「全部番剧」，点击封面即可加入已看列表';
+        } else if (q) {
+          // 有收藏但被关键词筛空：给出准确文案并支持一键清除
+          emptyEl.innerHTML = '<b>没有找到匹配的番剧</b>换个关键词试试' +
+            '<br><button class="btn" id="clearMineFilter" type="button">清除搜索</button>';
+        } else {
+          emptyEl.innerHTML = '<b>当前筛选下还没有番剧</b>换个状态看看' +
+            '<br><button class="btn" id="clearMineFilter" type="button">查看全部</button>';
+        }
+      } else if (state.onlyMine) {
+        emptyEl.innerHTML = '<b>当前筛选下还没有已收藏的番剧</b>关闭「只看已收藏」或换个季度看看' +
+          '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+      } else if (state.hideMine) {
+        emptyEl.innerHTML = '<b>这个范围内没有未收藏的番剧</b>关闭「隐藏已收藏」即可看到已收藏条目' +
+          '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+      } else if (DATA.length) {
+        emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>换个年份或关键词试试' +
+          '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+      } else {
+        emptyEl.innerHTML = '<b>数据还在生成中</b>请稍后刷新页面';
+      }
+    }
+    writeHash();
+    savePrefs();
+  }
+
+  // ---- 详情弹窗：大图、元信息、收藏状态、Bangumi 跳转 ----
+  var modalEl = $('modal');
+  var modalId = null;
+  var lastModalFocus = null;
+
+  // 相似推荐：同类型同地区优先，再按评分接近程度取前 4 部
+  function similarItems(item, limit) {
+    var pid = String(item.i);
+    var base = Number(item.s) || 0;
+    var pool = DATA.filter(function (x) {
+      return String(x.i) !== pid && x.p === item.p && x.g === item.g;
+    });
+    if (pool.length < limit) {
+      var extra = DATA.filter(function (x) {
+        return String(x.i) !== pid && x.p === item.p &&
+          !pool.some(function (p) { return String(p.i) === String(x.i); });
+      });
+      pool = pool.concat(extra);
+    }
+    return pool.sort(function (a, b) {
+      return Math.abs((Number(a.s) || 0) - base) - Math.abs((Number(b.s) || 0) - base);
+    }).slice(0, limit);
+  }
+
+  function renderDetail(id) {
+    var item = byId.get(id);
+    if (!item) return;
+    var collected = !!myMap[id];
+    $('detailCover').innerHTML = item.img
+      ? '<img src="' + escapeHtml(item.img) + '"' +
+        (coverSrcset(item.img) ? ' srcset="' + coverSrcset(item.img) + '" sizes="(max-width: 640px) 42vw, 220px"' : '') +
+        ' decoding="async" alt="" onerror="this.style.display=\'none\'">'
+      : '<span>无封面</span>';
+    var detailTitle = item.cn || item.n || '未知番剧';
+    $('modalTitle').innerHTML = highlightHtml(detailTitle, state.q);
+    $('modalSub').textContent = item.cn && item.n && item.cn !== item.n ? item.n : '';
+    // 在当前筛选结果中定位，提供上一部 / 下一部；不在结果内时隐藏
+    var seq = filteredList();
+    var pos = -1;
+    for (var pi = 0; pi < seq.length; pi += 1) {
+      if (String(seq[pi].i) === id) { pos = pi; break; }
+    }
+    var navBox = $('detailNav');
+    navBox.hidden = pos < 0 || seq.length < 2;
+    if (!navBox.hidden) {
+      var prevItem = pos > 0 ? seq[pos - 1] : null;
+      var nextItem = pos < seq.length - 1 ? seq[pos + 1] : null;
+      $('detailPrev').disabled = !prevItem;
+      $('detailNext').disabled = !nextItem;
+      $('detailPrev').title = prevItem ? '上一部：' + (prevItem.cn || prevItem.n || '') : '已是第一部';
+      $('detailNext').title = nextItem ? '下一部：' + (nextItem.cn || nextItem.n || '') : '已是最后一部';
+    }
+    var pairs = [
+      ['首播', item.d || '未知'],
+      ['类型', item.p || '未标注'],
+      ['地区', item.g || '未标注'],
+      ['话数', item.e ? item.e + ' 话' : '未知'],
+      ['评分', item.s ? Number(item.s).toFixed(1) : '暂无'],
+      ['排名', item.rk ? '#' + item.rk : '未上榜']
+    ];
+    // 收藏后补充加入时间，方便回顾是什么时候开始追的
+    if (collected && myMap[id].t) {
+      var jd = new Date(myMap[id].t);
+      pairs.push(['加入', jd.getFullYear() + '/' +
+        String(jd.getMonth() + 1).padStart(2, '0') + '/' +
+        String(jd.getDate()).padStart(2, '0')]);
+    }
+    var jumpQuarter = quarterOf(item.d);
+    var jumpHtml = jumpQuarter
+      ? '<button class="chipjump" type="button" data-jump="' + yearOf(item.d) + '-' + jumpQuarter +
+        '" title="查看 ' + yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季的全部番剧">' +
+        yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季 ›</button>'
+      : '';
+    $('detailMeta').innerHTML = pairs.map(function (p) {
+      var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
+      if (p[0] === '类型' && item.p) {
+        return '<button class="chip chipbtn" type="button" data-jump-type="' +
+          escapeHtml(item.p) + '" title="查看全部「' + escapeHtml(item.p) + '」番剧">' +
+          label + ' ›</button>';
+      }
+      if (p[0] === '地区' && item.g) {
+        return '<button class="chip chipbtn" type="button" data-jump-region="' +
+          escapeHtml(item.g) + '" title="查看全部「' + escapeHtml(item.g) + '」番剧">' +
+          label + ' ›</button>';
+      }
+      return '<span class="chip">' + label + '</span>';
+    }).join('') + jumpHtml;
+    var opts = $('statusOpts');
+    opts.hidden = !collected;
+    opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
+      return '<button data-status="' + s + '"' + (myMap[id].s === s ? ' class="active"' : '') + '>' + STATUS[s] + '</button>';
+    }).join('') : '';
+    var btn = $('detailToggle');
+    btn.textContent = collected ? '移出我的番剧' : '加入我的番剧';
+    btn.className = 'btn' + (collected ? ' danger' : ' primary');
+    $('detailLink').href = 'https://bgm.tv/subject/' + id;
+
+    var sims = similarItems(item, 4);
+    $('detailSimilar').innerHTML = sims.length
+      ? '<div class="similar-head">相似推荐 · 同类型同地区</div><div class="similar-list">' +
+        sims.map(function (x) {
+          return '<button class="sim-card" type="button" data-sim="' + x.i + '">' +
+            '<span class="sim-title">' + escapeHtml(x.cn || x.n || '未知番剧') + '</span>' +
+            '<span class="sim-meta">' + (x.s ? Number(x.s).toFixed(1) : '暂无') +
+            (x.d ? ' · ' + escapeHtml(x.d) : '') + '</span></button>';
+        }).join('') + '</div>'
+      : '';
+  }
+
+  function openDetail(id) {
+    if (!byId.has(id)) return;
+    // 切换到另一部番剧时回到顶部，避免沿用上一部的滚动位置
+    var switched = modalId !== id;
+    if (modalEl.hidden) lastModalFocus = document.activeElement;
+    modalId = id;
+    renderDetail(id);
+    modalEl.hidden = false;
+    $('detailToggle').focus();
+    if (switched) {
+      var panel = modalEl.querySelector('.modal-panel');
+      if (panel) panel.scrollTop = 0;
+    }
+    writeHash();
+  }
+
+  function closeDetail() {
+    if (modalEl.hidden) return;
+    var back = lastModalFocus;
+    var id = modalId;
+    lastModalFocus = null;
+    modalEl.hidden = true;
+    modalId = null;
+    writeHash();
+    // Esc / 关闭后把焦点还给触发卡片，键盘用户不丢失位置
+    if (!back || !document.contains(back) || back.offsetParent === null) {
+      back = id ? gridEl.querySelector('.card[data-id="' + id + '"]') : null;
+    }
+    if (back && back.focus) back.focus();
+  }
+
+  // 在当前筛选结果中前后移动，详情内连续浏览
+  function shiftDetail(delta) {
+    if (!modalId) return;
+    var seq = filteredList();
+    var pos = -1;
+    for (var i = 0; i < seq.length; i += 1) {
+      if (String(seq[i].i) === modalId) { pos = i; break; }
+    }
+    if (pos < 0) return;
+    var target = seq[pos + delta];
+    if (target) openDetail(String(target.i));
+  }
+
+  $('detailPrev').addEventListener('click', function () { shiftDetail(-1); });
+  $('detailNext').addEventListener('click', function () { shiftDetail(1); });
+
+  function setStatus(id, status) {
+    var item = byId.get(id);
+    if (!item || !myMap[id] || !STATUS[status]) return;
+    myMap[id].s = status;
+    saveMine();
+    toast('已标记为「' + STATUS[status] + '」：' + (item.cn || item.n));
+    render();
+  }
+
+  // 事件绑定
+  document.querySelectorAll('.tab').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      closeDetail();
+      document.querySelectorAll('.tab').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      state.tab = btn.dataset.tab;
+      render();
+    });
+  });
+
+  $('years').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-year]');
+    if (!btn) return;
+    state.year = btn.dataset.year;
+    renderYears();
+    render();
+  });
+
+  $('seasons').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-season]');
+    if (!btn) return;
+    state.season = btn.dataset.season;
+    renderSeasons();
+    render();
+  });
+
+  $('platform').addEventListener('change', function (e) {
+    state.platform = e.target.value;
+    render();
+  });
+
+  $('region').addEventListener('change', function (e) {
+    state.region = e.target.value;
+    render();
+  });
+
+  $('sort').addEventListener('change', function (e) {
+    state.sort = e.target.value;
+    render();
+  });
+
+  $('onlyMineBtn').addEventListener('click', function () {
+    state.onlyMine = !state.onlyMine;
+    // 与「隐藏已收藏」互斥，避免两个相反条件同时生效导致空列表
+    if (state.onlyMine) state.hideMine = false;
+    syncControls();
+    render();
+  });
+
+  $('highScoreBtn').addEventListener('click', function () {
+    state.highScore = !state.highScore;
+    syncControls();
+    render();
+  });
+
+  // 隐藏已收藏：只看还没加入清单的番剧，便于发现新作
+  $('hideMineBtn').addEventListener('click', function () {
+    state.hideMine = !state.hideMine;
+    if (state.hideMine) state.onlyMine = false;
+    syncControls();
+    render();
+  });
+
+  // 一键清除平台/地区/状态/搜索等筛选，保留当前年份季度与视图偏好
+  $('clearFiltersBtn').addEventListener('click', function () {
+    state.platform = 'all';
+    state.region = 'all';
+    state.status = 'all';
+    state.onlyMine = false;
+    state.highScore = false;
+    state.hideMine = false;
+    state.q = '';
+    searchEl.value = '';
+    syncControls();
+    render();
+    renderHist();
+    toast('已清除筛选条件');
+  });
+
+  $('viewToggle').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-view]');
+    if (!btn || btn.dataset.view === state.view) return;
+    state.view = btn.dataset.view;
+    syncControls();
+    render();
+  });
+
+  // 复制当前视图：地址栏 hash 已同步筛选与视图，直接复制即可分享同一组合
+  $('copyViewBtn').addEventListener('click', function () {
+    copyText(location.href, function (ok) {
+      toast(ok ? '已复制当前视图链接' : '复制失败，请手动复制地址栏链接');
+    });
+  });
+  $('nowSeasonBtn').addEventListener('click', goNowSeason);
+
+  $('filterToggle').addEventListener('click', function () {
+    var open = $('filters').classList.toggle('expanded');
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  $('loadMoreBtn').addEventListener('click', function () {
+    var list = filteredList();
+    var start = gridEl.querySelectorAll('.card').length;
+    var next = list.slice(start, start + PAGE_SIZE);
+    if (!next.length) { updateLoadMore(list.length, start, false); return; }
+    gridEl.insertAdjacentHTML('beforeend', next.map(cardHtml).join(''));
+    updateLoadMore(list.length, start + next.length, true);
+  });
+
+  // 空结果时一键清除筛选，回到最新年份的全量列表
+  emptyEl.addEventListener('click', function (e) {
+    if (e.target.closest('#clearMineFilter')) {
+      if (state.q) {
+        state.q = '';
+        searchEl.value = '';
+      } else {
+        state.status = 'all';
+      }
+      syncControls();
+      render();
+      return;
+    }
+    if (!e.target.closest('#resetFilters')) return;
+    state.q = '';
+    searchEl.value = '';
+    state.year = String(META.endYear || state.year);
+    state.season = 'all';
+    state.platform = 'all';
+    state.region = 'all';
+    state.status = 'all';
+    state.sort = 'score';
+    state.onlyMine = false;
+    state.highScore = false;
+    state.hideMine = false;
+    renderYears();
+    renderSeasons();
+    syncControls();
+    render();
+    toast('已清除筛选条件');
+  });
+
+  $('groupBtn').addEventListener('click', function () {
+    state.group = !state.group;
+    this.textContent = state.group ? '取消分组' : '按季度分组';
+    this.classList.toggle('primary', state.group);
+    $('groupBy').hidden = !state.group;
+    render();
+  });
+
+  // 分组方式：按首播季度（何时播出）或按加入年份（何时追的）
+  $('groupBy').addEventListener('change', function () {
+    state.groupBy = this.value === 'added' ? 'added' : 'air';
+    render();
+  });
+
+  $('boardBtn').addEventListener('click', function () {
+    state.view = state.view === 'board' ? 'grid' : 'board';
+    savePrefs();
+    writeHash();
+    render();
+  });
+
+  $('mineSort').addEventListener('change', function () {
+    state.mineSort = this.value;
+    savePrefs();
+    writeHash();
+    render();
+  });
+
+  // 我的番剧按个人评分收窄已移除
+
+  var searchTimer = null;
+  searchEl.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+      state.q = searchEl.value;
+      // 全库搜索清空后，状态过滤随之失效，避免下次搜索被静默限制
+      if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
+      render();
+      renderHist();
+    }, 140);
+  });
+
+  // 提交搜索（回车 / 失焦）时写入历史；Esc 一键清空关键词并恢复列表
+  searchEl.addEventListener('keydown', function (e) {
+    // 历史面板展开时，↑/↓ 在历史词间移动高亮，回车回填并搜索
+    var histBox = $('searchHist');
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && histBox && !histBox.hidden) {
+      e.preventDefault();
+      var n = searchHist.length;
+      var step = e.key === 'ArrowDown' ? 1 : -1;
+      histIndex = histIndex < 0
+        ? (step > 0 ? 0 : n - 1)
+        : (histIndex + step + n) % n;
+      renderHist();
+      return;
+    }
+    if (e.key === 'Escape' && searchEl.value) {
+      e.preventDefault();
+      searchEl.value = '';
+      state.q = '';
+      render();
+      renderHist();
+      searchEl.blur();
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (histIndex >= 0 && searchHist[histIndex]) {
+        e.preventDefault();
+        applyHistQuery(searchHist[histIndex]);
+        return;
+      }
+      pushHist(searchEl.value);
+    }
+  });
+  searchEl.addEventListener('change', function () {
+    pushHist(searchEl.value);
+  });
+  searchEl.addEventListener('focus', function () {
+    histIndex = -1;
+    renderHist();
+  });
+  searchEl.addEventListener('blur', function () {
+    // 延迟隐藏，给「点击历史词」留出时间
+    setTimeout(renderHist, 120);
+  });
+
+  $('searchHist').addEventListener('mousedown', function (e) {
+    // 阻止输入框失焦，保证点击历史词/删除按钮能先生效
+    if (e.target.closest('.hchip') || e.target.closest('.hdel') || e.target.closest('.hclear')) e.preventDefault();
+  });
+  $('searchHist').addEventListener('click', function (e) {
+    var del = e.target.closest('.hdel');
+    if (del) {
+      var drop = del.dataset.del;
+      searchHist = searchHist.filter(function (x) { return x !== drop; });
+      saveHist();
+      renderHist();
+      return;
+    }
+    if (e.target.closest('.hclear')) {
+      searchHist = [];
+      saveHist();
+      renderHist();
+      return;
+    }
+    var chip = e.target.closest('.hchip');
+    if (!chip) return;
+    applyHistQuery(chip.dataset.q);
+  });
+
+  // 点击页面其他位置时收起历史面板
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.search')) renderHist();
+  });
+
+  gridEl.addEventListener('click', function (e) {
+    var card = e.target.closest('.card');
+    if (!card) return;
+    // 长按刚结束时浏览器只会补一个 click，拦下这一次即可，避免误开详情
+    if (suppressClick) {
+      suppressClick = false;
+      if (Date.now() - lastLongPress < 700) return;
+    }
+    openDetail(card.dataset.id);
+  });
+
+  // ---- 卡片长按：浮出快捷状态菜单，省去先进详情再改状态 ----
+  var cardMenu = $('cardMenu');
+  var menuCardId = null;
+  var pressTimer = null;
+  var pressOrigin = null;
+  var lastLongPress = 0;
+  var suppressClick = false;
+
+  function closeCardMenu() {
+    if (cardMenu.hidden) return;
+    cardMenu.hidden = true;
+    menuCardId = null;
+  }
+
+  function openCardMenu(card) {
+    var id = card.dataset.id;
+    var item = byId.get(id);
+    if (!item) return;
+    menuCardId = id;
+    var entry = myMap[id];
+    $('cardMenuTitle').textContent = item.cn || item.n || '未知番剧';
+    $('cardMenuOpts').innerHTML = STATUS_ORDER.map(function (s) {
+      return '<button type="button" data-status="' + s + '"' +
+        (entry && entry.s === s ? ' class="active"' : '') + '>' +
+        (entry ? STATUS[s] : '加入 · ' + STATUS[s]) + '</button>';
+    }).join('');
+    // 已收藏才提供移出，避免对未收藏条目展示无效操作
+    $('cardMenuRemove').hidden = !entry;
+    cardMenu.hidden = false;
+    var rect = card.getBoundingClientRect();
+    var mw = cardMenu.offsetWidth;
+    var mh = cardMenu.offsetHeight;
+    var left = Math.min(rect.left + 6, window.innerWidth - mw - 10);
+    var top = rect.bottom + 6 + mh <= window.innerHeight
+      ? rect.bottom + 6
+      : Math.max(10, rect.top - mh - 6);
+    cardMenu.style.left = Math.max(10, left) + 'px';
+    cardMenu.style.top = top + 'px';
+  }
+
+  gridEl.addEventListener('contextmenu', function (e) {
+    // 移动端长按卡片时不弹出系统图片菜单，交给快捷状态菜单
+    if (e.target.closest('.card')) e.preventDefault();
+  });
+
+  gridEl.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    var card = e.target.closest('.card');
+    if (!card) return;
+    clearTimeout(pressTimer);
+    pressOrigin = { x: e.clientX, y: e.clientY };
+    pressTimer = setTimeout(function () {
+      lastLongPress = Date.now();
+      suppressClick = true;
+      pressOrigin = null;
+      openCardMenu(card);
+    }, 600);
+  });
+
+  gridEl.addEventListener('pointermove', function (e) {
+    if (!pressOrigin) return;
+    if (Math.abs(e.clientX - pressOrigin.x) > 10 || Math.abs(e.clientY - pressOrigin.y) > 10) {
+      clearTimeout(pressTimer);
+      pressOrigin = null;
+    }
+  });
+
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (type) {
+    gridEl.addEventListener(type, function () {
+      clearTimeout(pressTimer);
+      pressOrigin = null;
+    });
+  });
+
+  cardMenu.addEventListener('click', function (e) {
+    var statusBtn = e.target.closest('[data-status]');
+    var detailBtn = e.target.closest('[data-act="detail"]');
+    var removeBtn = e.target.closest('[data-act="remove"]');
+    var id = menuCardId;
+    if (removeBtn && id) {
+      var ritem = byId.get(id);
+      delete myMap[id];
+      saveMine();
+      closeCardMenu();
+      toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''));
+      render();
+      return;
+    }
+    if (statusBtn && id) {
+      var item = byId.get(id);
+      var status = statusBtn.dataset.status;
+      var isNew = !myMap[id];
+      if (isNew) {
+        myMap[id] = { s: status, t: Date.now() };
+      } else {
+        myMap[id].s = status;
+      }
+      saveMine();
+      closeCardMenu();
+      toast((isNew ? '已加入并标记为「' : '已标记为「') + STATUS[status] + '」：' +
+        (item.cn || item.n || ''));
+      render();
+      return;
+    }
+    if (detailBtn && id) {
+      closeCardMenu();
+      openDetail(id);
+    }
+  });
+
+  // 点击菜单外、滚动或窗口尺寸变化时收起
+  document.addEventListener('click', function (e) {
+    if (cardMenu.hidden) return;
+    if (Date.now() - lastLongPress < 500) return;
+    if (!e.target.closest('#cardMenu')) closeCardMenu();
+  });
+  window.addEventListener('scroll', closeCardMenu, true);
+  window.addEventListener('resize', closeCardMenu);
+
+  $('statusRow').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-status]');
+    if (!btn) return;
+    state.status = btn.dataset.status;
+    render();
+  });
+
+  $('statusOpts').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-status]');
+    if (!btn || !modalId) return;
+    var id = modalId;
+    closeDetail();
+    setStatus(id, btn.dataset.status);
+  });
+
+  // 复制文本：优先 Clipboard API，不可用时退回隐藏 textarea + execCommand
+  function copyText(text, done) {
+    var fallback = function () {
+      var ok = false;
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = !!(document.execCommand && document.execCommand('copy'));
+        document.body.removeChild(ta);
+      } catch (e) {
+        ok = false;
+      }
+      done(ok);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        done(true);
+      }, fallback);
+      return;
+    }
+    fallback();
+  }
+
+  $('detailToggle').addEventListener('click', function () {
+    if (!modalId) return;
+    var id = modalId;
+    var item = byId.get(id);
+    if (!item) return;
+    if (myMap[id]) {
+      delete myMap[id];
+      toast('已移除：' + (item.cn || item.n));
+    } else {
+      myMap[id] = { s: 'done', t: Date.now() };
+      toast('已加入我的番剧：' + (item.cn || item.n));
+    }
+    saveMine();
+    render();
+    renderDetail(id);
+  });
+
+  $('detailShare').addEventListener('click', function () {
+    if (!modalId) return;
+    var item = byId.get(modalId);
+    var title = (item && (item.cn || item.n)) || document.title;
+    var url = location.href;
+    var copyFallback = function () {
+      copyText(url, function (ok) {
+        toast(ok ? '已复制分享链接' : '复制失败，请手动复制地址栏链接');
+      });
+    };
+    // 移动端优先唤起系统分享面板，桌面等不支持的环境回退复制链接
+    if (navigator.share) {
+      navigator.share({ title: title, text: title, url: url }).then(function () {
+        toast('已分享链接：' + title);
+      }, function (err) {
+        // 用户主动取消分享时保持静默，不弹失败提示
+        if (err && err.name === 'AbortError') return;
+        copyFallback();
+      });
+      return;
+    }
+    copyFallback();
+  });
+
+  $('prevSeason').addEventListener('click', function () { shiftQuarter(-1); });
+  $('nextSeason').addEventListener('click', function () { shiftQuarter(1); });
+
+  // 主题切换：按钮与快捷键 T 共用同一入口
+  function toggleTheme() {
+    state.theme = state.theme === 'light' ? 'dark' : 'light';
+    applyTheme();
+    savePrefs();
+    writeHash();
+    toast(state.theme === 'light' ? '已切换到亮色主题' : '已切换到暗色主题');
+  }
+
+  $('themeBtn').addEventListener('click', toggleTheme);
+
+  $('modalClose').addEventListener('click', closeDetail);
+  document.querySelector('.modal-mask').addEventListener('click', closeDetail);
+  $('detailSimilar').addEventListener('click', function (e) {
+    var target = e.target.closest ? e.target.closest('[data-sim]') : null;
+    if (target) openDetail(String(target.dataset.sim));
+  });
+
+  // 从详情跳到全库：清掉会干扰结果的搜索与开关，只保留目标维度
+  function jumpToAll(opts, msg) {
+    closeDetail();
+    state.tab = 'all';
+    state.year = opts.year || 'all';
+    state.season = opts.season || 'all';
+    state.platform = opts.platform || 'all';
+    state.region = opts.region || 'all';
+    state.q = '';
+    searchEl.value = '';
+    state.status = 'all';
+    state.onlyMine = false;
+    state.highScore = false;
+    state.hideMine = false;
+    syncControls();
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    toast(msg);
+  }
+
+  // 详情内标签跳转：季度 / 类型 / 地区都可一键进入对应全库筛选
+  $('detailMeta').addEventListener('click', function (e) {
+    var quarterBtn = e.target.closest('[data-jump]');
+    if (quarterBtn) {
+      var parts = String(quarterBtn.dataset.jump).split('-');
+      if (parts.length !== 2) return;
+      jumpToAll({ year: parts[0], season: parts[1] },
+        '已跳到 ' + parts[0] + ' 年 ' + parts[1] + ' 月季');
+      return;
+    }
+    var typeBtn = e.target.closest('[data-jump-type]');
+    if (typeBtn && typeBtn.dataset.jumpType) {
+      jumpToAll({ platform: typeBtn.dataset.jumpType },
+        '已筛选全部「' + typeBtn.dataset.jumpType + '」番剧');
+      return;
+    }
+    var regionBtn = e.target.closest('[data-jump-region]');
+    if (regionBtn && regionBtn.dataset.jumpRegion) {
+      jumpToAll({ region: regionBtn.dataset.jumpRegion },
+        '已筛选全部「' + regionBtn.dataset.jumpRegion + '」番剧');
+    }
+  });
+
+  $('helpBtn').addEventListener('click', function () {
+    $('help').hidden = false;
+    $('helpClose').focus();
+  });
+  $('helpClose').addEventListener('click', function () { $('help').hidden = true; });
+  document.querySelector('.help-mask').addEventListener('click', function () { $('help').hidden = true; });
+
+  document.addEventListener('keydown', function (e) {
+    if (!$('help').hidden) {
+      if (e.key === 'Escape' || e.key === '?') {
+        e.preventDefault();
+        $('help').hidden = true;
+      }
+      return;
+    }
+    if (!$('cardMenu').hidden && e.key === 'Escape') {
+      e.preventDefault();
+      closeCardMenu();
+      return;
+    }
+    if (e.key === 'Escape' && !modalEl.hidden) { closeDetail(); return; }
+    if (!modalEl.hidden) {
+      // 详情内 ←/→ 连续浏览上一部 / 下一部，与列表外切换季度区分
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        shiftDetail(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+      }
+      // 焦点陷阱：Tab 在弹窗内循环，避免焦点跑到背后的列表
+      if (e.key === 'Tab') {
+        var nodes = modalEl.querySelectorAll('button, a[href], input, [tabindex]:not([tabindex="-1"])');
+        var focusables = [];
+        for (var fi = 0; fi < nodes.length; fi += 1) {
+          if (!nodes[fi].disabled && nodes[fi].offsetParent !== null) focusables.push(nodes[fi]);
+        }
+        if (focusables.length) {
+          var first = focusables[0];
+          var last = focusables[focusables.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+      return;
+    }
+    var t = e.target;
+    var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (e.key === '?' && !typing) {
+      e.preventDefault();
+      $('help').hidden = false;
+      return;
+    }
+    if (e.key === '/' && !typing) {
+      e.preventDefault();
+      searchEl.focus();
+      return;
+    }
+    if (typing) return;
+    if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      toggleTheme();
+      return;
+    }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); shiftQuarter(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); shiftQuarter(1); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      var cards = Array.prototype.slice.call(gridEl.querySelectorAll('.card'));
+      if (!cards.length) return;
+      e.preventDefault();
+      var idx = cards.indexOf(document.activeElement);
+      var next = idx < 0 ? 0 : idx + (e.key === 'ArrowDown' ? 1 : -1);
+      if (next < 0) next = 0;
+      if (next > cards.length - 1) next = cards.length - 1;
+      cards[next].focus();
+    }
+  });
+
+  function stamp() {
+    var d = new Date();
+    return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  }
+
+  function download(filename, text, type) {
+    var blob = new Blob([text], { type: type });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function sortedMine() {
+    return Object.keys(myMap).sort(function (a, b) {
+      return (myMap[b].t || 0) - (myMap[a].t || 0);
+    });
+  }
+
+  function csvCell(v) {
+    var s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  $('exportBtn').addEventListener('click', function () {
+    var ids = Object.keys(myMap).map(function (id) {
+      var entry = myMap[id] || {};
+      return { id: Number(id), status: entry.s || 'done', addedAt: entry.t || 0 };
+    });
+    var payload = {
+      app: 'yuc-anime-list',
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      items: ids
+    };
+    download('我的番剧-' + stamp() + '.json', JSON.stringify(payload, null, 2), 'application/json');
+    markBackup();
+    toast('已导出 ' + ids.length + ' 部番剧');
+  });
+
+  $('exportCsv').addEventListener('click', function () {
+    var rows = [['条目ID', '中文名', '原名', '类型', '地区', '首播', '总话数', '状态', '加入时间']];
+    sortedMine().forEach(function (id) {
+      var x = byId.get(id);
+      var e = myMap[id];
+      if (!x || !e) return;
+      rows.push([
+        id, x.cn || '', x.n || '', x.p || '', x.g || '', x.d || '', x.e || '',
+        STATUS[e.s] || '看完', new Date(e.t || Date.now()).toLocaleString('zh-CN'),
+      ]);
+    });
+    var csv = '\ufeff' + rows.map(function (r) {
+      return r.map(csvCell).join(',');
+    }).join('\r\n');
+    download('我的番剧-' + stamp() + '.csv', csv, 'text/csv;charset=utf-8');
+    markBackup();
+    toast('已导出 CSV：' + (rows.length - 1) + ' 部');
+  });
+
+  $('exportMd').addEventListener('click', function () {
+    var ids = sortedMine();
+    var lines = [
+      '# 我的番剧',
+      '',
+      '共 ' + ids.length + ' 部 · 导出于 ' + new Date().toLocaleString('zh-CN'),
+      '',
+      '| 番名 | 状态 | 首播 |',
+      '| --- | --- | --- |',
+    ];
+    ids.forEach(function (id) {
+      var x = byId.get(id);
+      var e = myMap[id];
+      if (!x || !e) return;
+      var name = '[' + String(x.cn || x.n || '未知').replace(/\|/g, '\\|') + '](https://bgm.tv/subject/' + id + ')';
+      lines.push('| ' + name + ' | ' + (STATUS[e.s] || '看完') + ' | ' + (x.d || '—') + ' |');
+    });
+    download('我的番剧-' + stamp() + '.md', lines.join('\n'), 'text/markdown;charset=utf-8');
+    markBackup();
+    toast('已导出 Markdown：' + ids.length + ' 部');
+  });
+
+  $('importBtn').addEventListener('click', function () { $('fileInput').click(); });
+
+  $('fileInput').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var parsed = JSON.parse(String(reader.result));
+        var raw = Array.isArray(parsed) ? parsed : (parsed.items || parsed.ids || []);
+        var added = 0;
+        var merged = 0;
+        var skipped = 0;
+        raw.forEach(function (entry, index) {
+          var isObj = entry && typeof entry === 'object';
+          var id = String(isObj ? entry.id : entry);
+          if (!byId.has(id)) { skipped += 1; return; }
+          var status = isObj && STATUS[entry.status] ? entry.status : 'done';
+          var cur = myMap[id];
+          if (!cur) {
+            myMap[id] = { s: status, t: (isObj && entry.addedAt) || (Date.now() + index) };
+            added += 1;
+            return;
+          }
+          // 已有条目保留本地状态与加入时间，只统计合并数量
+          merged += 1;
+        });
+        saveMine();
+        render();
+        toast('导入完成：新增 ' + added + ' 部，合并 ' + merged + ' 部' +
+          (skipped ? '，跳过 ' + skipped + ' 条无效记录' : ''));
+      } catch (err) {
+        toast('导入失败：文件格式不正确');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  $('clearBtn').addEventListener('click', function () {
+    if (!Object.keys(myMap).length) { toast('列表已经是空的'); return; }
+    if (!confirm('确定清空「我的番剧」吗？建议先导出备份。')) return;
+    myMap = {};
+    saveMine();
+    render();
+    toast('已清空我的番剧');
+  });
+
+  // 用户手动修改 hash（前进/后退或粘贴链接）时同步界面
+  window.addEventListener('hashchange', function () {
+    if (applyingHash) return;
+    applyingHash = true;
+    try {
+      if (applyHash()) {
+        var deep = hashDetail();
+        syncControls();
+        render();
+        if (deep) openDetail(deep);
+        else closeDetail();
+      }
+    } finally {
+      applyingHash = false;
+    }
+  });
+
+  // 回到顶部：滚动超过一屏后出现，点击平滑回顶
+  var toTopEl = $('toTop');
+  var toTopTick = false;
+  function syncToTop() {
+    var show = window.scrollY > 600;
+    if (show === !toTopEl.hidden) return;
+    toTopEl.hidden = !show;
+  }
+  window.addEventListener('scroll', function () {
+    if (toTopTick) return;
+    toTopTick = true;
+    window.requestAnimationFrame(function () {
+      toTopTick = false;
+      syncToTop();
+    });
+  }, { passive: true });
+  toTopEl.addEventListener('click', function () {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  syncToTop();
+
+  renderYears();
+  renderSeasons();
+  fillFilterOptions();
+  var hashMap = parseHash();
+  var fromHash = applyStateMap(hashMap);
+  var prefs = fromHash ? null : loadPrefs();
+  if (prefs) applyStateMap(prefs);
+  // 既没有 hash 主题参数、也没有本地偏好时，跟随系统配色
+  var hasThemePref = !!(hashMap && hashMap.t) || !!(prefs && prefs.t);
+  if (!hasThemePref) state.theme = systemTheme();
+  // 先读取深链再 render，避免 render 写 hash 时丢掉 d 参数
+  var initialDetail = fromHash ? hashDetail() : null;
+  syncControls();
+  render();
+  if (initialDetail) openDetail(initialDetail);
+  $('dataHint').textContent = DATA.length
+    ? '共 ' + DATA.length + ' 部 · ' + (META.startYear || '') + '–' + (META.endYear || '')
+    : '数据未就绪';
+  if (!canStore) {
+    $('storageWarn').hidden = false;
+  }
+})();
+</script>
+<script>
+  // 注册 Service Worker，提供应用壳与封面的离线缓存
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>

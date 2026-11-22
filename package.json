@@ -1,0 +1,21 @@
+{
+  "name": "bangumi-anime-library",
+  "version": "1.0.0",
+  "private": true,
+  "description": "本地优先的番剧浏览与追番清单，内置 Bangumi 1990–2026 季度数据",
+  "license": "MIT",
+  "author": "Deckard",
+  "scripts": {
+    "start": "npx serve .",
+    "verify": "node scripts/verify.mjs",
+    "check-data": "node scripts/check-data.mjs",
+    "fetch-data": "node scripts/fetch-bangumi.mjs"
+  },
+  "keywords": [
+    "anime",
+    "bangumi",
+    "watchlist",
+    "pwa",
+    "offline-first"
+  ]
+}

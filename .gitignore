@@ -1,0 +1,14 @@
+# 自动化循环的内部状态与备份，不入库
+.loop/
+
+# 数据抓取的中间产物，仅保留最终 data/anime-data.js
+data/build/
+
+# 依赖与工具产物
+node_modules/
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
