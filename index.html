@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.4">
+<meta name="version" content="1.6.5">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2214,6 +2214,9 @@
         <select id="region">
           <option value="all">全部地区</option>
         </select>
+        <select id="genre">
+          <option value="all">全部题材</option>
+        </select>
         <select id="sort">
           <option value="score">按评分</option>
           <option value="heat">按热度</option>
@@ -2308,7 +2311,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.4</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.5</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2423,6 +2426,31 @@
   var STATUS = { want: '想看', doing: '在看', done: '看完', drop: '弃番' };
   var STATUS_ORDER = ['want', 'doing', 'done', 'drop'];
 
+  // 题材分类：与 scripts/genres.mjs 的 id/label 保持一致，构建期把 tag 归一后写入 tg 字段
+  var GENRES = [
+    { id: 'sci', label: '科幻' },
+    { id: 'fan', label: '奇幻' },
+    { id: 'ise', label: '异世界' },
+    { id: 'rom', label: '恋爱' },
+    { id: 'sch', label: '校园' },
+    { id: 'sli', label: '日常' },
+    { id: 'hea', label: '治愈' },
+    { id: 'com', label: '喜剧' },
+    { id: 'mys', label: '悬疑' },
+    { id: 'act', label: '动作' },
+    { id: 'mec', label: '机战' },
+    { id: 'spo', label: '运动' },
+    { id: 'mus', label: '音乐' },
+    { id: 'yur', label: '百合' },
+    { id: 'bl', label: '耽美' },
+    { id: 'hor', label: '恐怖' },
+    { id: 'his', label: '历史' },
+    { id: 'gou', label: '美食' },
+    { id: 'dra', label: '剧情' }
+  ];
+  var GENRE_LABEL = {};
+  GENRES.forEach(function (g) { GENRE_LABEL[g.id] = g.label; });
+
   var now = new Date();
   var state = {
     tab: 'all',
@@ -2430,6 +2458,7 @@
     season: String(SEASON_OF_MONTH[now.getMonth() + 1] || 1),
     platform: 'all',
     region: 'all',
+    genre: 'all',
     sort: 'score',
     status: 'all',
     onlyMine: false,
@@ -2693,6 +2722,7 @@
     if (['all', '1', '4', '7', '10'].indexOf(map.s) >= 0) state.season = map.s;
     if (map.f === 'all' || Object.prototype.hasOwnProperty.call(platforms, map.f)) state.platform = map.f;
     if (map.r === 'all' || Object.prototype.hasOwnProperty.call(regions, map.r)) state.region = map.r;
+    if (map.gr === 'all' || Object.prototype.hasOwnProperty.call(GENRE_LABEL, map.gr)) state.genre = map.gr;
     if (['score', 'heat', 'date', 'name'].indexOf(map.o) >= 0) state.sort = map.o;
     if (['all'].concat(STATUS_ORDER).indexOf(map.st) >= 0) state.status = map.st;
     if (map.om === '1' || map.om === '0' || typeof map.om === 'boolean') {
@@ -2743,6 +2773,7 @@
         s: state.season,
         f: state.platform,
         r: state.region,
+        gr: state.genre,
         o: state.sort,
         st: state.status,
         om: state.onlyMine,
@@ -2828,6 +2859,7 @@
       's=' + encodeURIComponent(state.season),
       'f=' + encodeURIComponent(state.platform),
       'r=' + encodeURIComponent(state.region),
+      'gr=' + encodeURIComponent(state.genre),
       'o=' + encodeURIComponent(state.sort),
       'st=' + encodeURIComponent(state.status),
       'om=' + (state.onlyMine ? '1' : '0'),
@@ -2882,6 +2914,7 @@
     searchEl.value = state.q;
     $('platform').value = state.platform;
     $('region').value = state.region;
+    $('genre').value = state.genre;
     $('sort').value = state.sort;
     $('mineSort').value = state.mineSort;
     var groupBtn = $('groupBtn');
@@ -3075,6 +3108,24 @@
     select.innerHTML = html;
   }
 
+  function fillGenreOptions() {
+    var counts = {};
+    DATA.forEach(function (x) {
+      (x.tg || []).forEach(function (id) { counts[id] = (counts[id] || 0) + 1; });
+    });
+    var html = '<option value="all">全部题材</option>';
+    GENRES.forEach(function (g) {
+      if (counts[g.id]) {
+        html += '<option value="' + g.id + '">' + escapeHtml(g.label) +
+          ' (' + counts[g.id] + ')</option>';
+      }
+    });
+    var select = $('genre');
+    select.innerHTML = html;
+    // 旧数据或首屏数据还没有 tg 字段时先隐藏，等全库补齐后自动出现
+    select.hidden = !Object.keys(counts).length;
+  }
+
   function fillFilterOptions() {
     var platformCounts = {};
     var regionCounts = {};
@@ -3086,6 +3137,7 @@
     });
     fillSelect($('platform'), platformCounts, '全部类型');
     fillSelect($('region'), regionCounts, '全部地区');
+    fillGenreOptions();
   }
 
   function baseList() {
@@ -3180,6 +3232,11 @@
       list = list.filter(function (x) { return x.g !== '日本' && x.g !== '中国'; });
     } else if (state.tab === 'all' && state.region !== 'all') {
       list = list.filter(function (x) { return x.g === state.region; });
+    }
+
+    // 题材筛选：构建期已把自由 tag 归一成 tg 数组，这里只做数组包含判断
+    if (state.tab === 'all' && state.genre !== 'all') {
+      list = list.filter(function (x) { return (x.tg || []).indexOf(state.genre) >= 0; });
     }
 
     // 只看已收藏：在全部番剧/搜索里快速收窄到个人清单
@@ -3414,6 +3471,7 @@
     if (state.q.trim()) chips.push({ k: 'q', label: '搜索', v: state.q.trim() });
     if (state.platform !== 'all') chips.push({ k: 'platform', label: '平台', v: chipLabel('platform') });
     if (state.region !== 'all') chips.push({ k: 'region', label: '地区', v: chipLabel('region') });
+    if (state.genre !== 'all') chips.push({ k: 'genre', label: '题材', v: GENRE_LABEL[state.genre] || state.genre });
     if (state.sort !== 'score') chips.push({ k: 'sort', label: '排序', v: chipLabel('sort') });
     if (state.status !== 'all') chips.push({ k: 'status', label: '状态', v: STATUS[state.status] || state.status });
     if (state.onlyMine) chips.push({ k: 'onlyMine', label: '范围', v: '只看已收藏' });
@@ -3442,6 +3500,9 @@
     } else if (key === 'region') {
       state.region = 'all';
       $('region').value = 'all';
+    } else if (key === 'genre') {
+      state.genre = 'all';
+      $('genre').value = 'all';
     } else if (key === 'sort') {
       state.sort = 'score';
       $('sort').value = 'score';
@@ -3552,7 +3613,7 @@
     return {
       name: name,
       tab: state.tab, q: state.q, year: state.year, season: state.season,
-      platform: state.platform, region: state.region, sort: state.sort,
+      platform: state.platform, region: state.region, genre: state.genre, sort: state.sort,
       status: state.status, onlyMine: state.onlyMine, highScore: state.highScore,
       hideMine: state.hideMine, view: state.view, group: state.group,
       groupBy: state.groupBy, mineSort: state.mineSort
@@ -3562,7 +3623,7 @@
     // 复用 hash / 偏好的校验逻辑，避免损坏的视图写入非法 year、platform 等值
     applyStateMap({
       tab: v.tab, y: v.year, s: v.season, f: v.platform, r: v.region,
-      o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
+      gr: v.genre || 'all', o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
       hm: !!v.hideMine, v: v.view, ms: v.mineSort,
       gb: v.group ? v.groupBy : '', q: v.q || ''
     });
@@ -3600,6 +3661,7 @@
     $('filterToggle').style.display = state.tab === 'mine' ? 'none' : '';
     // 筛选按钮与「清除筛选」共用一套计数：前者不含状态与搜索，另单独计入排序
     var filterCount = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
+      (state.genre !== 'all' ? 1 : 0) +
       (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
       (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) + (state.q.trim() ? 1 : 0);
     var activeFilters = filterCount - (state.status !== 'all' ? 1 : 0) -
@@ -3710,7 +3772,17 @@
   var pendingDetail = null;
   var lastModalFocus = null;
 
-  // 相似推荐：同类型同地区优先，再按评分接近程度取前 4 部
+  // 题材重叠数：详情推荐优先展示同题材作品
+  function genreOverlap(a, b) {
+    var ga = a.tg || [];
+    var gb = b.tg || [];
+    if (!ga.length || !gb.length) return 0;
+    var n = 0;
+    ga.forEach(function (g) { if (gb.indexOf(g) >= 0) n += 1; });
+    return n;
+  }
+
+  // 相似推荐：题材重叠优先，其次同类型同地区，再按评分接近程度取前 4 部
   function similarItems(item, limit) {
     var pid = String(item.i);
     var base = Number(item.s) || 0;
@@ -3725,6 +3797,9 @@
       pool = pool.concat(extra);
     }
     return pool.sort(function (a, b) {
+      var oa = genreOverlap(a, item);
+      var ob = genreOverlap(b, item);
+      if (oa !== ob) return ob - oa;
       return Math.abs((Number(a.s) || 0) - base) - Math.abs((Number(b.s) || 0) - base);
     }).slice(0, limit);
   }
@@ -3778,6 +3853,13 @@
         '" title="查看 ' + yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季的全部番剧">' +
         yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季 ›</button>'
       : '';
+    var genreHtml = (item.tg || []).map(function (gid) {
+      var label = GENRE_LABEL[gid];
+      if (!label) return '';
+      return '<button class="chip chipbtn" type="button" data-jump-genre="' + escapeHtml(gid) +
+        '" title="查看全部「' + escapeHtml(label) + '」番剧"><i>题材</i>' +
+        escapeHtml(label) + ' ›</button>';
+    }).join('');
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
       if (p[0] === '类型' && item.p) {
@@ -3791,7 +3873,7 @@
           label + ' ›</button>';
       }
       return '<span class="chip">' + label + '</span>';
-    }).join('') + jumpHtml;
+    }).join('') + jumpHtml + genreHtml;
     var opts = $('statusOpts');
     opts.hidden = !collected;
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
@@ -3960,6 +4042,11 @@
     render();
   });
 
+  $('genre').addEventListener('change', function (e) {
+    state.genre = e.target.value;
+    render();
+  });
+
   $('sort').addEventListener('change', function (e) {
     state.sort = e.target.value;
     render();
@@ -3991,6 +4078,7 @@
   $('clearFiltersBtn').addEventListener('click', function () {
     state.platform = 'all';
     state.region = 'all';
+    state.genre = 'all';
     state.status = 'all';
     state.onlyMine = false;
     state.highScore = false;
@@ -4199,6 +4287,7 @@
         searchEl.value = '';
         state.platform = 'all';
         state.region = 'all';
+        state.genre = 'all';
         state.sort = 'score';
         state.status = 'all';
         state.onlyMine = false;
@@ -4364,6 +4453,7 @@
     state.season = 'all';
     state.platform = 'all';
     state.region = 'all';
+    state.genre = 'all';
     state.status = 'all';
     state.sort = 'score';
     state.onlyMine = false;
@@ -4833,6 +4923,7 @@
     state.season = opts.season || 'all';
     state.platform = opts.platform || 'all';
     state.region = opts.region || 'all';
+    state.genre = opts.genre || 'all';
     state.q = '';
     searchEl.value = '';
     state.status = 'all';
@@ -4865,6 +4956,13 @@
     if (regionBtn && regionBtn.dataset.jumpRegion) {
       jumpToAll({ region: regionBtn.dataset.jumpRegion },
         '已筛选全部「' + regionBtn.dataset.jumpRegion + '」番剧');
+      return;
+    }
+    var genreBtn = e.target.closest('[data-jump-genre]');
+    if (genreBtn && genreBtn.dataset.jumpGenre) {
+      var gid = genreBtn.dataset.jumpGenre;
+      jumpToAll({ genre: gid },
+        '已筛选全部「' + (GENRE_LABEL[gid] || gid) + '」番剧');
     }
   });
 
@@ -5018,13 +5116,15 @@
   });
 
   $('exportCsv').addEventListener('click', function () {
-    var rows = [['条目ID', '中文名', '原名', '类型', '地区', '首播', '总话数', '状态', '已看', '加入时间']];
+    var rows = [['条目ID', '中文名', '原名', '类型', '地区', '题材', '首播', '总话数', '状态', '已看', '加入时间']];
     sortedMine().forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
       if (!x || !e) return;
+      var genres = (x.tg || []).map(function (gid) { return GENRE_LABEL[gid]; })
+        .filter(Boolean).join('/');
       rows.push([
-        id, x.cn || '', x.n || '', x.p || '', x.g || '', x.d || '', x.e || '',
+        id, x.cn || '', x.n || '', x.p || '', x.g || '', genres, x.d || '', x.e || '',
         STATUS[e.s] || '看完', e.ep || 0, new Date(e.t || Date.now()).toLocaleString('zh-CN'),
       ]);
     });
@@ -5043,8 +5143,8 @@
       '',
       '共 ' + ids.length + ' 部 · 导出于 ' + new Date().toLocaleString('zh-CN'),
       '',
-      '| 番名 | 状态 | 进度 | 首播 |',
-      '| --- | --- | --- | --- |',
+      '| 番名 | 状态 | 进度 | 首播 | 题材 |',
+      '| --- | --- | --- | --- | --- |',
     ];
     ids.forEach(function (id) {
       var x = byId.get(id);
@@ -5052,7 +5152,10 @@
       if (!x || !e) return;
       var name = '[' + String(x.cn || x.n || '未知').replace(/\|/g, '\\|') + '](https://bgm.tv/subject/' + id + ')';
       var prog = (e.ep || 0) + (x.e ? ' / ' + x.e : '');
-      lines.push('| ' + name + ' | ' + (STATUS[e.s] || '看完') + ' | ' + prog + ' | ' + (x.d || '—') + ' |');
+      var genres = (x.tg || []).map(function (gid) { return GENRE_LABEL[gid]; })
+        .filter(Boolean).join(' / ') || '—';
+      lines.push('| ' + name + ' | ' + (STATUS[e.s] || '看完') + ' | ' + prog + ' | ' +
+        (x.d || '—') + ' | ' + genres.replace(/\|/g, '\\|') + ' |');
     });
     download('我的番剧-' + stamp() + '.md', lines.join('\n'), 'text/markdown;charset=utf-8');
     markBackup();

@@ -4,6 +4,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { GENRES } from './genres.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const raw = await readFile(path.join(ROOT, 'data', 'anime-data.js'), 'utf8');
@@ -14,6 +15,7 @@ if (!match) {
 }
 const data = JSON.parse(match[1]);
 
+const GENRE_IDS = new Set(GENRES.map((g) => g.id));
 const label = {
   duplicate: '重复 ID',
   date: '非法日期',
@@ -21,8 +23,12 @@ const label = {
   eps: '话数异常',
   title: '缺少标题',
   id: '非法 ID',
+  genre: '题材字段异常',
+  leak: '缓存字段泄漏',
 };
-const issues = { duplicate: [], date: [], score: [], eps: [], title: [], id: [] };
+const issues = {
+  duplicate: [], date: [], score: [], eps: [], title: [], id: [], genre: [], leak: [],
+};
 const seen = new Map();
 
 data.forEach((x, idx) => {
@@ -35,6 +41,16 @@ data.forEach((x, idx) => {
   if (x.s != null && (Number(x.s) < 0 || Number(x.s) > 10)) issues.score.push(`${x.i}:${x.s}`);
   if (x.e != null && (!Number.isInteger(Number(x.e)) || Number(x.e) < 0)) issues.eps.push(`${x.i}:${x.e}`);
   if (!String(x.cn || '').trim() && !String(x.n || '').trim()) issues.title.push(String(x.i));
+  if (x.rt) issues.leak.push(String(x.i));
+  if (x.tg != null) {
+    if (!Array.isArray(x.tg) || !x.tg.length) {
+      issues.genre.push(`${x.i}:${JSON.stringify(x.tg)}`);
+    } else {
+      const bad = x.tg.filter((g) => !GENRE_IDS.has(g));
+      if (bad.length) issues.genre.push(`${x.i}:${bad.join('/')}`);
+      if (new Set(x.tg).size !== x.tg.length) issues.genre.push(`${x.i}:重复`);
+    }
+  }
 });
 
 const total = Object.values(issues).reduce((n, arr) => n + arr.length, 0);
@@ -42,5 +58,13 @@ Object.keys(issues).forEach((key) => {
   const arr = issues[key];
   if (arr.length) console.log(`FAIL ${label[key]}：${arr.length} 条，示例 ${arr.slice(0, 5).join(', ')}`);
 });
+
+const withGenre = data.filter((x) => Array.isArray(x.tg) && x.tg.length).length;
+const genreCounts = {};
+data.forEach((x) => (x.tg || []).forEach((g) => { genreCounts[g] = (genreCounts[g] || 0) + 1; }));
+const dist = GENRES.filter((g) => genreCounts[g.id])
+  .map((g) => `${g.label} ${genreCounts[g.id]}`).join(' · ');
+console.log(`题材覆盖：${withGenre}/${data.length}（${(withGenre / data.length * 100).toFixed(1)}%）`);
+console.log(`题材分布：${dist || '无'}`);
 console.log(`条目总数：${data.length}；问题总数：${total}`);
 process.exit(total ? 1 : 0);

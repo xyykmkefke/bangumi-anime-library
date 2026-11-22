@@ -580,11 +580,11 @@ async function main() {
           const s = [...document.querySelectorAll('#seasons .pill')].find((b) => b.classList.contains('active'));
           return document.querySelectorAll('.card').length + '|' + (y ? y.dataset.year : '') + '|' + (s ? s.dataset.season : '');
         })()`);
-        if (prefsState === '91|2024|1') break;
+        if (prefsState === periodCards + '|2024|1') break;
       } catch {}
       await sleep(250);
     }
-    check('无 hash 打开时沿用上次筛选', prefsState === '91|2024|1', prefsState);
+    check('无 hash 打开时沿用上次筛选', prefsState === periodCards + '|2024|1', prefsState);
 
     // 筛选项必须覆盖数据中实际出现的平台与地区
     const platformValues = await cdp.evaluate("[...document.getElementById('platform').options].map((o) => o.value)");
@@ -599,6 +599,39 @@ async function main() {
       regionValues.includes('美国') && regionValues.includes('韩国'),
       regionValues.join(' / '),
     );
+
+    const genreValues = await cdp.evaluate("[...document.getElementById('genre').options].map((o) => o.value)");
+    check(
+      '题材筛选覆盖数据中的题材',
+      genreValues.includes('sci') && genreValues.includes('rom'),
+      genreValues.join(' / '),
+    );
+
+    const genreFilterState = await cdp.evaluate(`(async () => {
+      const data = window.ANIME_DATA || [];
+      const byId = new Map(data.map((x) => [String(x.i), x]));
+      const card = [...document.querySelectorAll('#grid .card')].find((c) => {
+        const it = byId.get(c.dataset.id) || {};
+        return (it.tg || []).length;
+      });
+      if (!card) return 'no-card';
+      const item = byId.get(card.dataset.id) || {};
+      const g = (item.tg || [])[0];
+      if (!g) return 'no-genre';
+      const sel = document.getElementById('genre');
+      sel.value = g;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const ok = cards.length > 0 &&
+        cards.every((c) => ((byId.get(c.dataset.id) || {}).tg || []).includes(g));
+      const result = [ok, decodeURIComponent(location.hash).includes('gr=' + g), sel.value === g].join('|');
+      sel.value = 'all';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      return result;
+    })()`);
+    check('题材筛选可正常收窄结果并写入 URL', genreFilterState === 'true|true|true', genreFilterState);
 
     // 键盘可达性：Tab 应能聚焦到卡片，Enter 可切换收藏
     await cdp.evaluate("document.querySelector('.search input').focus(); true");
@@ -1314,9 +1347,10 @@ async function main() {
         document.getElementById('loadMore').hidden ? 'hidden' : 'shown',
         document.getElementById('loadMoreBtn').textContent].join('|');
     })()`);
+    const total2024 = Number(pagingStart.split('|')[0]);
     check(
       '大结果集分批渲染首屏 240 部',
-      pagingStart === '416|240|shown|还有 176 部 · 显示更多',
+      pagingStart === total2024 + '|240|shown|还有 ' + (total2024 - 240) + ' 部 · 显示更多',
       pagingStart,
     );
 
@@ -1325,7 +1359,7 @@ async function main() {
       return [document.querySelectorAll('#grid .card').length,
         document.getElementById('loadMore').hidden].join('|');
     })()`);
-    check('点击显示更多补齐剩余条目', pagingEnd === '416|true', pagingEnd);
+    check('点击显示更多补齐剩余条目', pagingEnd === total2024 + '|true', pagingEnd);
 
     // 空结果：显示「清除筛选条件」，点击后恢复列表
     await cdp.evaluate(`(() => {
@@ -2529,6 +2563,46 @@ async function main() {
     } catch {}
     check('详情类型与地区标签可跳转筛选', chipJumpOk, chipJumpInfo);
 
+    // 详情题材标签：点击后进入该题材的全库结果
+    const genreJumpRaw = await cdp.evaluate(`(async () => {
+      const data = window.ANIME_DATA || [];
+      const byId = new Map(data.map((x) => [String(x.i), x]));
+      const card = [...document.querySelectorAll('#grid .card')].find((c) => {
+        const it = byId.get(c.dataset.id);
+        return it && (it.tg || []).length;
+      });
+      if (!card) return 'no-card';
+      const item = byId.get(card.dataset.id);
+      const g = item.tg[0];
+      const count = data.filter((x) => (x.tg || []).includes(g)).length;
+      card.click();
+      await new Promise((r) => setTimeout(r, 350));
+      const btn = document.querySelector('#detailMeta [data-jump-genre="' + g + '"]');
+      if (!btn) return 'no-btn';
+      btn.click();
+      await new Promise((r) => setTimeout(r, 450));
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const allMatch = cards.length > 0 &&
+        cards.every((c) => ((byId.get(c.dataset.id) || {}).tg || []).includes(g));
+      const result = [
+        document.getElementById('modal').hidden,
+        document.getElementById('genre').value,
+        Number((document.querySelector('#resultbar b') || {}).textContent || 0),
+        decodeURIComponent(location.hash).includes('gr=' + g),
+        allMatch,
+      ].join('|');
+      document.getElementById('genre').value = 'all';
+      document.getElementById('genre').dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      return JSON.stringify({ g, count, result });
+    })()`);
+    let genreJumpOk = false;
+    try {
+      const r = JSON.parse(genreJumpRaw);
+      genreJumpOk = r.result === ['true', r.g, String(r.count), 'true', 'true'].join('|');
+    } catch {}
+    check('详情题材标签可跳转筛选', genreJumpOk, genreJumpRaw);
+
     // 累计改动后应主动提示备份
     const dirtyHint = await cdp.evaluate(`(async () => {
       const key = 'yuc_my_anime_v1';
@@ -2717,12 +2791,14 @@ async function main() {
 
     // 冷启动深链：首屏轻量数据只有最近一年，指向旧番的 d 参数应在全库补齐后打开
     await cdp.evaluate("localStorage.removeItem('yuc_gist_v1')");
-    const coldId = await cdp.evaluate(`(() => {
-      const end = String((window.ANIME_META || {}).endYear || '');
-      const old = (window.ANIME_DATA || []).find((x) => x.d && String(x.d).slice(0, 4) !== end);
-      return old ? String(old.i) : '';
-    })()`);
-    await cdp.evaluate(`location.hash = '#d=' + ${JSON.stringify(coldId)}`);
+    // 从构建产物里取一个确定不在首屏年份内的旧番，避免依赖页面当前加载阶段
+    const coldSrc = await readFile(path.join(ROOT, 'data', 'anime-data.js'), 'utf8');
+    const coldMeta = JSON.parse(coldSrc.match(/window\.ANIME_META\s*=\s*(\{[\s\S]*?\});/)[1]);
+    const coldData = JSON.parse(coldSrc.slice(coldSrc.indexOf('['), coldSrc.lastIndexOf(']') + 1));
+    const coldItem = coldData.find((x) => x.d && String(x.d).slice(0, 4) !== String(coldMeta.endYear));
+    const coldId = coldItem ? String(coldItem.i) : '';
+    // 用 replaceState 写入深链，避免当前页面的 hashchange 先触发并改写 hash
+    await cdp.evaluate(`history.replaceState(null, '', location.pathname + location.search + '#d=' + ${JSON.stringify(coldId)}); true`);
     await cdp.send('Page.reload');
     let coldNote = '';
     let coldOk = false;

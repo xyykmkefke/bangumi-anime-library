@@ -6,6 +6,7 @@ import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { buildLite } from './build-lite.mjs';
 import { initials } from './build-pinyin.mjs';
+import { genreIdsFromNames, rawTagNames } from './genres.mjs';
 
 const BASE = 'https://bgmapi.anibt.net';
 const START_YEAR = 1990;
@@ -13,6 +14,8 @@ const END_YEAR = 2026;
 const PAGE_SIZE = 20;
 const DELAY_MS = 800;
 const USER_AGENT = 'yuc-anime-list/1.0';
+// --refresh：忽略已有季度缓存，重新抓取（用于补充 tag 等新字段）
+const REFRESH = process.argv.includes('--refresh');
 
 const rootDir = path.resolve(import.meta.dirname, '..');
 const buildDir = path.join(rootDir, 'data', 'build');
@@ -83,6 +86,8 @@ function toRegion(metaTags = [], tags = []) {
 }
 
 function slim(item) {
+  // rt 只写入季度缓存，便于以后调整题材映射时离线重算；不会进入 anime-data.js
+  const tagNames = rawTagNames(item.meta_tags, item.tags);
   return {
     i: item.id,
     n: item.name || '',
@@ -96,6 +101,8 @@ function slim(item) {
     g: toRegion(item.meta_tags, item.tags),
     img: item.images?.common || item.images?.large || '',
     py: initials(item.name_cn || item.name || ''),
+    rt: tagNames,
+    tg: genreIdsFromNames(tagNames),
   };
 }
 
@@ -138,7 +145,7 @@ async function main() {
     const cacheFile = path.join(buildDir, `${quarter.key}.json`);
     let items;
 
-    if (await exists(cacheFile)) {
+    if (!REFRESH && await exists(cacheFile)) {
       items = JSON.parse(await readFile(cacheFile, 'utf8'));
     } else {
       items = [];
@@ -149,7 +156,13 @@ async function main() {
         console.log(`[${idx + 1}/${quarters.length}] ${quarter.key} 抓取 ${count} 部`);
       } catch (err) {
         console.error(`[${idx + 1}/${quarters.length}] ${quarter.key} 失败：${err.message}`);
-        continue;
+        // 刷新失败时退回旧缓存，避免整季度数据丢失
+        if (await exists(cacheFile)) {
+          items = JSON.parse(await readFile(cacheFile, 'utf8'));
+          console.warn(`    ${quarter.key} 使用旧缓存`);
+        } else {
+          continue;
+        }
       }
       await sleep(DELAY_MS);
     }
@@ -157,7 +170,12 @@ async function main() {
     for (const item of items) {
       if (seen.has(item.i)) continue;
       seen.add(item.i);
-      all.push(item);
+      // 有原始标签时按最新映射重算，调整题材表后无需重新联网抓取
+      const tg = item.rt ? genreIdsFromNames(item.rt) : (item.tg || []);
+      const { rt, ...rest } = item;
+      if (tg.length) rest.tg = tg;
+      else delete rest.tg;
+      all.push(rest);
     }
   }
 
