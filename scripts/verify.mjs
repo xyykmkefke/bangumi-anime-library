@@ -214,6 +214,34 @@ async function main() {
     const dataStamp = await cdp.evaluate("document.getElementById('dataUpdated').textContent");
     check('页脚显示数据更新时间', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(dataStamp), dataStamp);
 
+    const viewSelectInfo = await cdp.evaluate(`(() => {
+      const sel = document.getElementById('viewSelect');
+      if (!sel) return 'missing';
+      return [sel.getAttribute('aria-label'), sel.options.length,
+        [...sel.options].map((o) => o.value).join(','),
+        document.querySelector('#viewSelect option[value="board"]').disabled,
+        document.querySelector('#viewSelect option[value="calendar"]').disabled].join('|');
+    })()`);
+    check(
+      '视图切换收为单个下拉入口',
+      viewSelectInfo === '视图|4|grid,list,board,calendar|true|false',
+      viewSelectInfo,
+    );
+
+    // 离线提示条：断网显示，恢复后自动收起并轻提示
+    const offlineInfo = await cdp.evaluate(`(() => {
+      const bar = document.getElementById('offlineBar');
+      const initial = bar.hidden;
+      window.dispatchEvent(new Event('offline'));
+      const shown = !bar.hidden;
+      window.dispatchEvent(new Event('online'));
+      const restored = bar.hidden;
+      const toastMsg = document.getElementById('toast').textContent;
+      document.getElementById('toast').classList.remove('show');
+      return [initial, shown, restored, /网络已恢复/.test(toastMsg)].join('|');
+    })()`);
+    check('离线提示条随网络状态显示与恢复', offlineInfo === 'true|true|true|true', offlineInfo);
+
     const firstTitle = await cdp.evaluate("document.querySelector('.card .title')?.textContent || ''");
     const firstId = await cdp.evaluate("document.querySelector('.card')?.dataset.id || ''");
     await cdp.evaluate("document.querySelector('.card').click()");
@@ -548,7 +576,11 @@ async function main() {
     );
 
     // 网格/列表视图切换：写入 hash，刷新后保持
-    await cdp.evaluate("document.querySelector('#resultbar [data-view=\"list\"]').click()");
+    await cdp.evaluate(`(() => {
+      const sel = document.getElementById('viewSelect');
+      sel.value = 'list';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
     await sleep(300);
     const listState = await cdp.evaluate(
       "document.getElementById('grid').classList.contains('list') + '|' + /(?:^|[#&])v=list(?:&|$)/.test(location.hash)",
@@ -566,7 +598,11 @@ async function main() {
     }
     check('列表视图刷新后保持', listRestored === true);
 
-    await cdp.evaluate("document.querySelector('#resultbar [data-view=\"grid\"]').click()");
+    await cdp.evaluate(`(() => {
+      const sel = document.getElementById('viewSelect');
+      sel.value = 'grid';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
     await sleep(300);
 
     // 浏览偏好持久化：无 hash 打开时应沿用上次筛选
@@ -943,20 +979,28 @@ async function main() {
     );
 
     // 看板视图：四列按状态分组，并可切回网格
-    const boardInfo = await cdp.evaluate(`(() => {
-      document.querySelector('#resultbar [data-view="board"]').click();
+    const boardInfo = await cdp.evaluate(`(async () => {
+      const pick = (v) => {
+        const sel = document.getElementById('viewSelect');
+        sel.value = v;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      pick('board');
+      await new Promise((r) => setTimeout(r, 150));
       const cols = [...document.querySelectorAll('#grid .board-col')];
       const heads = cols.map((c) => c.querySelector('.board-head b').textContent).join(',');
       const total = cols.reduce((sum, c) => sum + c.querySelectorAll('.card').length, 0);
       const hash = new URLSearchParams(location.hash.slice(1)).get('v');
-      const active = document.querySelector('#resultbar [data-view].active').dataset.view;
-      document.querySelector('#resultbar [data-view="board"]').click();
+      const active = document.getElementById('viewSelect').value;
+      pick('grid');
+      await new Promise((r) => setTimeout(r, 150));
       return [cols.length, heads, total, hash, active,
-        new URLSearchParams(location.hash.slice(1)).get('v')].join('|');
+        new URLSearchParams(location.hash.slice(1)).get('v'),
+        document.getElementById('grid').classList.contains('board')].join('|');
     })()`);
     check(
       '看板视图按状态分四列',
-      boardInfo === '4|想看,在看,看完,弃番|3|board|board|grid',
+      boardInfo === '4|想看,在看,看完,弃番|3|board|board|grid|false',
       boardInfo,
     );
 
@@ -1248,6 +1292,17 @@ async function main() {
     })()`);
     check('弹窗焦点陷阱与 Esc 焦点还原', focusInfo === 'true|true|true', focusInfo);
 
+    // 跳转链接：Tab 首个入口，激活后焦点进入列表
+    const skipInfo = await cdp.evaluate(`(() => {
+      const link = document.getElementById('skipLink');
+      link.focus();
+      const rect = link.getBoundingClientRect();
+      const visible = document.activeElement === link && rect.left >= 0 && rect.width > 0;
+      link.click();
+      return [visible, document.activeElement === document.getElementById('grid')].join('|');
+    })()`);
+    check('跳转链接可把焦点移到番剧列表', skipInfo === 'true|true', skipInfo);
+
     // 主题：点击切换 html[data-theme] 与背景色，并写入 hash / 偏好
     const themeInfo = await cdp.evaluate(`(() => {
       const btn = document.getElementById('themeBtn');
@@ -1357,6 +1412,31 @@ async function main() {
       '字号、密度与动效设置生效并持久化',
       settingsInfo === 'true|true|lg|compact|reduce|true|true|md',
       settingsInfo,
+    );
+
+    // 设置弹窗：打开后焦点进入弹窗，Tab 循环，Esc 关闭并归焦
+    const settingsFocus = await cdp.evaluate(`(() => {
+      document.getElementById('moreBtn').click();
+      document.querySelector('[data-more="settings"]').click();
+      const modal = document.getElementById('settingsModal');
+      const nodes = [...modal.querySelectorAll('button')].filter((b) => b.offsetParent !== null);
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const opened = !modal.hidden;
+      const focusInside = document.activeElement === first;
+      last.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+      const wrapped = document.activeElement === first;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      const ae = document.activeElement;
+      const aeInfo = ae ? (ae.id || ae.className || ae.tagName) : 'none';
+      return [opened, focusInside, wrapped, modal.hidden,
+        ae === document.getElementById('moreBtn'), aeInfo].join('|');
+    })()`);
+    check(
+      '设置弹窗 Tab 循环且 Esc 后焦点归位',
+      settingsFocus === 'true|true|true|true|true|moreBtn',
+      settingsFocus,
     );
 
     // 还原系统媒体模拟，避免影响后续检查
@@ -1516,19 +1596,21 @@ async function main() {
       highScoreInfo,
     );
 
-    // 快捷键帮助：按钮打开、Esc 关闭、? 再次打开
+    // 快捷键帮助：按钮打开、Esc 关闭并归焦、? 再次打开
     const helpInfo = await cdp.evaluate(`(() => {
       const help = document.getElementById('help');
-      document.getElementById('helpBtn').click();
+      const btn = document.getElementById('helpBtn');
+      btn.click();
       const opened = help.hidden ? 0 : document.querySelectorAll('#help li').length;
+      const focusInside = document.activeElement === document.getElementById('helpClose');
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      const closedByEsc = help.hidden;
+      const closedByEsc = help.hidden && document.activeElement === btn;
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
       const openedByKey = !help.hidden;
       document.getElementById('helpClose').click();
-      return [opened, closedByEsc, openedByKey, help.hidden].join('|');
+      return [opened, closedByEsc, openedByKey, help.hidden, focusInside].join('|');
     })()`);
-    check('快捷键帮助可打开与关闭', helpInfo === '8|true|true|true', helpInfo);
+    check('快捷键帮助可打开与关闭', helpInfo === '8|true|true|true|true', helpInfo);
 
     // 方向键在卡片间移动焦点
     const navInfo = await cdp.evaluate(`(() => {
@@ -1807,16 +1889,23 @@ async function main() {
     const calInfo = await cdp.evaluate(`(async () => {
       document.querySelectorAll('.tab')[0].click();
       await new Promise((r) => setTimeout(r, 300));
-      document.querySelector('#resultbar [data-view="calendar"]').click();
-      await new Promise((r) => setTimeout(r, 350));
+      const pick = (v) => {
+        const sel = document.getElementById('viewSelect');
+        sel.value = v;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      pick('calendar');
+      await new Promise((r) => setTimeout(r, 250));
       const cols = document.querySelectorAll('#grid .cal-col').length;
       const items = document.querySelectorAll('#grid .cal-item').length;
-      const active = document.querySelector('#resultbar [data-view].active').dataset.view;
-      document.querySelector('#resultbar [data-view="calendar"]').click();
-      await new Promise((r) => setTimeout(r, 250));
-      return [cols, items > 0, active].join('|');
+      const active = document.getElementById('viewSelect').value;
+      const boardDisabled = document.querySelector('#viewSelect option[value="board"]').disabled;
+      pick('grid');
+      await new Promise((r) => setTimeout(r, 200));
+      return [cols, items > 0, active, boardDisabled,
+        document.getElementById('viewSelect').value].join('|');
     })()`);
-    check('可切换到本季日历并显示 7 天', calInfo.startsWith('7|true|calendar'), calInfo);
+    check('可切换到本季日历并显示 7 天', calInfo === '7|true|calendar|true|grid', calInfo);
 
     // 命令面板：Ctrl+K 打开、可搜索番剧、Esc 关闭
     const paletteInfo = await cdp.evaluate(`(async () => {
@@ -1893,6 +1982,16 @@ async function main() {
       return [!!st, st.hidden, items.includes('export-json'), items.includes('sync')].join('|');
     })()`);
     check('头部更多菜单整合导出与同步', syncBits === 'true|true|true|true', syncBits);
+
+    // 更多菜单按视图 / 数据 / 设置分组，减少一次性铺开
+    const menuGroups = await cdp.evaluate(`(() => {
+      const labels = [...document.querySelectorAll('#moreMenu .popmenu-label')].map((x) => x.textContent);
+      const items = [...document.querySelectorAll('#moreMenu > *')];
+      const firstLabel = items[0].classList.contains('popmenu-label') ? items[0].textContent : '';
+      const last = items[items.length - 1].dataset.more || '';
+      return [labels.join(','), firstLabel, last].join('|');
+    })()`);
+    check('更多菜单按视图/数据/设置分组', menuGroups === '视图,数据,设置|视图|check-update', menuGroups);
 
     const updateCheck = await cdp.evaluate(`(async () => {
       const old = window.fetch;
@@ -1972,6 +2071,33 @@ async function main() {
         getComputedStyle(document.getElementById('filterMask')).display !== 'none'].join('|');
     })()`);
     check('移动端筛选以底部抽屉展示', sheetState === 'false|true|true|true', sheetState);
+
+    // 抽屉内高级筛选项默认收起，可展开与再次收起
+    const advFilter = await cdp.evaluate(`(async () => {
+      const platform = document.getElementById('platform');
+      const toggle = document.getElementById('advFilterToggle');
+      const wasActive = platform.value !== 'all' ||
+        document.getElementById('region').value !== 'all' ||
+        document.getElementById('onlyMineBtn').getAttribute('aria-pressed') === 'true' ||
+        document.getElementById('highScoreBtn').getAttribute('aria-pressed') === 'true' ||
+        document.getElementById('hideMineBtn').getAttribute('aria-pressed') === 'true';
+      const initial = getComputedStyle(platform).display !== 'none';
+      const toggleVisible = getComputedStyle(toggle).display !== 'none';
+      toggle.click();
+      await new Promise((r) => setTimeout(r, 100));
+      const afterFirst = getComputedStyle(platform).display !== 'none';
+      const expanded = toggle.getAttribute('aria-expanded');
+      toggle.click();
+      await new Promise((r) => setTimeout(r, 100));
+      const afterSecond = getComputedStyle(platform).display !== 'none';
+      return [initial === wasActive, toggleVisible, afterFirst === !wasActive,
+        afterSecond === wasActive, expanded === (wasActive ? 'false' : 'true')].join('|');
+    })()`);
+    check(
+      '移动端高级筛选默认收起并可展开',
+      advFilter === 'true|true|true|true|true',
+      advFilter,
+    );
 
     // 移动端紧凑头部：搜索默认收起，可点图标展开；主要控件达到 44px
     const mobileChrome = await cdp.evaluate(`(async () => {
@@ -2716,6 +2842,25 @@ async function main() {
     })()`);
     check('累计改动后提示备份', /^true\|有 \d+ 处改动待备份$/.test(dirtyHint), dirtyHint);
 
+    // 云同步弹窗：Tab 在面板内循环，Esc 关闭后焦点回到同步按钮
+    const syncFocus = await cdp.evaluate(`(() => {
+      document.getElementById('syncBtn').click();
+      const modal = document.getElementById('syncModal');
+      const opened = !modal.hidden;
+      const nodes = [...modal.querySelectorAll('button, input')]
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      last.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+      const wrapped = document.activeElement === first;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      const target = document.getElementById('minebar').hidden
+        ? document.getElementById('moreBtn') : document.getElementById('mineMoreBtn');
+      return [opened, wrapped, modal.hidden, document.activeElement === target].join('|');
+    })()`);
+    check('云同步弹窗 Tab 循环且 Esc 后焦点归位', syncFocus === 'true|true|true|true', syncFocus);
+
     // Token 无效时应给出明确错误，而不是静默失败
     const syncErr = await cdp.evaluate(`(async () => {
       const real = window.fetch;
@@ -2909,6 +3054,23 @@ async function main() {
       await sleep(250);
     }
     check('冷启动深链在全库补齐后打开', coldOk, coldNote);
+
+    // 我的番剧为空：给出明确下一步「去全部番剧」
+    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); history.replaceState(null, '', location.pathname + location.search); true");
+    await cdp.send('Page.reload');
+    await sleep(800);
+    const mineEmptyCta = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 300));
+      const empty = document.getElementById('empty');
+      const btn = document.getElementById('browseAllBtn');
+      const shown = !empty.hidden && !!btn;
+      if (btn) btn.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return [shown, document.querySelectorAll('.tab')[0].classList.contains('active'),
+        document.querySelectorAll('#grid .card').length > 0, empty.hidden].join('|');
+    })()`);
+    check('我的番剧为空时提供去全部番剧入口', mineEmptyCta === 'true|true|true|true', mineEmptyCta);
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");

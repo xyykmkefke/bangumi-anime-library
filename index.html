@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.7">
+<meta name="version" content="1.6.8">
 <style>
   :root {
     --bg: #0d0f14;
@@ -380,6 +380,20 @@
     line-height: 1.6;
   }
 
+  /* 离线提示条：断网时出现在头部下方，恢复后自动收起 */
+  .offlinebar {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 212, 121, 0.35);
+    border-radius: 8px;
+    background: rgba(255, 212, 121, 0.10);
+    color: #ffd479;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .offlinebar[hidden] { display: none; }
+
   .statusrow {
     display: flex;
     gap: 6px;
@@ -711,42 +725,19 @@
     -webkit-line-clamp: 1;
   }
 
-  .viewtoggle {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    background: var(--panel);
-  }
-
-  .viewtoggle button {
-    height: 24px;
-    padding: 0 9px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--muted);
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .viewtoggle button:hover { color: var(--text); }
-
-  .viewtoggle button.active {
-    background: rgba(255, 107, 157, 0.16);
-    color: #ffa8c6;
-    font-weight: 600;
-  }
-
-  .viewtoggle button:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
-  .viewbar {
+  /* 结果栏视图选择：主界面保留网格 / 列表，看板与日历作为次级入口 */
+  .viewselect {
     margin-left: auto;
     align-self: center;
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
   }
 
   /* 看板视图：想看 / 在看 / 看完 / 弃番 四列 */
@@ -1065,7 +1056,6 @@
   html[data-theme="light"] .resultbar b,
   html[data-theme="light"] .pill.active,
   html[data-theme="light"] .status-opts button.active,
-  html[data-theme="light"] .viewtoggle button.active,
   html[data-theme="light"] .cardmenu-opts button.active,
   html[data-theme="light"] .ctool.on,
   html[data-theme="light"] .ctool:hover,
@@ -1330,6 +1320,27 @@
   footer a:hover { color: var(--text); }
 
   .filter-toggle { display: none; }
+  #advFilterToggle { display: none; }
+
+  /* 键盘用户：首个 Tab 可跳过头部直接进入列表 */
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 8px;
+    z-index: 100;
+    padding: 8px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .skip-link:focus { left: 20px; }
+
+  #grid:focus { outline: none; }
+  #grid:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 6px; border-radius: 8px; }
 
   @media (max-width: 640px) {
     .wrap { padding: 0 max(14px, env(safe-area-inset-right, 0px)) 0 max(14px, env(safe-area-inset-left, 0px)); }
@@ -1358,8 +1369,11 @@
     .filters.in-sheet .row2 > * { flex: 0 0 auto; }
     .filters.in-sheet .row2 .spacer { display: none; }
     .filters.in-sheet .row2 .hint { flex-basis: 100%; }
-    .viewbar { gap: 0; }
-    .viewbar button { height: 36px; padding: 0 10px; }
+    /* 抽屉里的高级筛选项默认收起，避免一屏塞满控件 */
+    #advFilterToggle { display: inline-flex; align-items: center; height: 32px; }
+    .filters.in-sheet .adv-filter { display: none; }
+    .filters.in-sheet.adv-open .adv-filter { display: inline-flex; align-items: center; }
+    .viewselect { height: 36px; font-size: 13px; }
   }
   /* ===== v1.2 视觉改版：冷静工具风（单强调色 / 细边框 / 低圆角 / 无渐变玻璃） ===== */
   :root {
@@ -1467,13 +1481,7 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.danger:hover { border-color: rgba(220, 90, 90, 0.6); color: #e88; background: var(--panel); }
 
-  .viewtoggle { background: transparent; border: 0; padding: 0; gap: 2px; }
-  .viewtoggle button { border-radius: 5px; font-size: 12px; }
-  .viewtoggle button.active {
-    background: var(--panel-2);
-    color: var(--text);
-    box-shadow: inset 0 0 0 1px var(--line);
-  }
+  .viewselect { border-radius: 5px; }
 
   main { padding: 16px 0 80px; }
   .resultbar { margin-bottom: 12px; }
@@ -1637,7 +1645,6 @@
   html[data-theme="light"] .cprog button:hover:not(:disabled),
   html[data-theme="light"] .status-opts button.active,
   html[data-theme="light"] .cardmenu-opts button.active,
-  html[data-theme="light"] .viewtoggle button.active,
   html[data-theme="light"] .hchip:hover { color: var(--accent); border-color: var(--accent); }
   html[data-theme="light"] .resultbar b { color: var(--text); }
 
@@ -1725,6 +1732,9 @@
   }
   .iconbtn svg { width: 17px; height: 17px; stroke: var(--text); }
 
+  /* 桌面端同样保留「更多」入口：设置、同步与导出都在这里 */
+  #moreBtn { display: inline-flex; }
+
   .search-toggle { display: none; }
 
   /* 弹出菜单：头部“更多”、我的番剧“更多”、筛选视图共用 */
@@ -1765,6 +1775,13 @@
     color: var(--muted-2);
     font-size: 11px;
   }
+  .popmenu-label {
+    padding: 6px 10px 3px;
+    color: var(--muted-2);
+    font-size: 11px;
+    letter-spacing: 0.4px;
+  }
+  .popmenu-label:first-child { padding-top: 2px; }
   #moreMenu { top: calc(100% - 4px); right: 0; }
   #viewsMenu { top: calc(100% + 6px); right: 0; }
   .mine-menu { top: calc(100% + 6px); right: 0; }
@@ -2291,6 +2308,8 @@
 </head>
 <body>
 
+<button class="skip-link" id="skipLink" type="button">跳到番剧列表</button>
+
 <header>
   <div class="wrap">
     <div class="topbar">
@@ -2315,20 +2334,24 @@
       </button>
       <button class="btn iconbtn" id="moreBtn" type="button" aria-label="更多操作" aria-expanded="false">⋯</button>
       <div class="popmenu" id="moreMenu" hidden>
-        <button type="button" data-more="theme">切换主题</button>
-        <button type="button" data-more="settings">设置</button>
-        <button type="button" data-more="help">键盘快捷键</button>
-        <button type="button" data-more="check-update">检查更新</button>
+        <div class="popmenu-label">视图</div>
         <button type="button" data-more="palette">命令面板<kbd>Ctrl K</kbd></button>
         <button type="button" data-more="calendar">本季日历</button>
-        <hr>
+        <div class="popmenu-label">数据</div>
         <button type="button" data-more="export-json">导出 JSON</button>
         <button type="button" data-more="export-csv">导出 CSV</button>
         <button type="button" data-more="export-md">导出 Markdown</button>
         <button type="button" data-more="import">导入备份</button>
         <button type="button" data-more="sync">云同步</button>
+        <div class="popmenu-label">设置</div>
+        <button type="button" data-more="theme">切换主题</button>
+        <button type="button" data-more="settings">设置</button>
+        <button type="button" data-more="help">键盘快捷键</button>
+        <button type="button" data-more="check-update">检查更新</button>
       </div>
     </div>
+
+    <div class="offlinebar" id="offlineBar" hidden>当前处于离线状态，封面与全库数据可能无法加载；已保存的追番清单仍可正常使用。</div>
 
     <div class="filters-slot" id="filtersSlot">
     <div class="filters" id="filters">
@@ -2338,10 +2361,10 @@
         <div class="years" id="seasons" style="overflow: visible;"></div>
         <button class="pill nav" id="nextSeason" type="button" aria-label="下一季度">›</button>
         <button class="btn" id="nowSeasonBtn" type="button" title="回到当前年份与季度">本季</button>
-        <select id="platform">
+        <select id="platform" class="adv-filter">
           <option value="all">全部类型</option>
         </select>
-        <select id="region">
+        <select id="region" class="adv-filter">
           <option value="all">全部地区</option>
         </select>
         <select id="genre">
@@ -2353,13 +2376,14 @@
           <option value="date">按时间</option>
           <option value="name">按名称</option>
         </select>
-        <button class="btn" id="onlyMineBtn" type="button" aria-pressed="false" title="只显示已加入我的番剧的条目">只看已收藏</button>
-        <button class="btn" id="highScoreBtn" type="button" aria-pressed="false" title="只显示评分 8.0 及以上的番剧">高分 ≥8.0</button>
-        <button class="btn" id="hideMineBtn" type="button" aria-pressed="false" title="隐藏已加入我的番剧的条目，只看还没收藏的">隐藏已收藏</button>
+        <button class="btn adv-filter" id="onlyMineBtn" type="button" aria-pressed="false" title="只显示已加入我的番剧的条目">只看已收藏</button>
+        <button class="btn adv-filter" id="highScoreBtn" type="button" aria-pressed="false" title="只显示评分 8.0 及以上的番剧">高分 ≥8.0</button>
+        <button class="btn adv-filter" id="hideMineBtn" type="button" aria-pressed="false" title="隐藏已加入我的番剧的条目，只看还没收藏的">隐藏已收藏</button>
         <button class="btn" id="clearFiltersBtn" type="button" hidden title="清除平台、地区、状态与搜索等筛选条件">清除筛选</button>
-        <button class="btn" id="copyViewBtn" type="button" title="复制包含当前筛选与视图的链接">复制视图链接</button>
-        <button class="btn" id="viewsBtn" type="button" aria-expanded="false" title="保存或套用筛选组合">视图</button>
+        <button class="btn adv-filter" id="copyViewBtn" type="button" title="复制包含当前筛选与视图的链接">复制视图链接</button>
+        <button class="btn adv-filter" id="viewsBtn" type="button" aria-expanded="false" title="保存或套用筛选组合">视图</button>
         <div class="popmenu" id="viewsMenu" hidden></div>
+        <button class="btn" id="advFilterToggle" type="button" aria-expanded="false">高级筛选</button>
         <span class="spacer"></span>
         <span class="hint" id="dataHint"></span>
       </div>
@@ -2430,8 +2454,16 @@
 
   <div class="statusrow" id="statusRow" hidden></div>
 
-  <div class="resultbar" id="resultbar"></div>
-  <div class="grid" id="grid" aria-busy="true">
+  <div class="resultbar" id="resultbar">
+    <b id="resultCount">0</b><span id="resultLabel"></span>
+    <select class="viewselect" id="viewSelect" aria-label="视图" title="切换视图">
+      <option value="grid">网格</option>
+      <option value="list">列表</option>
+      <option value="board">看板</option>
+      <option value="calendar">日历</option>
+    </select>
+  </div>
+  <div class="grid" id="grid" tabindex="-1" aria-busy="true">
     <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
     <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
     <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
@@ -2446,7 +2478,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.7</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.8</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3109,6 +3141,18 @@
     }
   }
 
+  // 视图下拉与当前 tab 对齐：看板只在「我的番剧」，日历只在「全部番剧」
+  function syncViewSelect() {
+    var sel = $('viewSelect');
+    if (!sel) return;
+    for (var i = 0; i < sel.options.length; i += 1) {
+      var v = sel.options[i].value;
+      sel.options[i].disabled = (v === 'board' && state.tab !== 'mine') ||
+        (v === 'calendar' && state.tab === 'mine');
+    }
+    sel.value = state.view;
+  }
+
   // 把 state 同步回所有控件，避免从 hash 恢复后控件与结果不一致
   function syncControls() {
     searchEl.value = state.q;
@@ -3145,10 +3189,7 @@
     document.querySelectorAll('.tab').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
-    document.querySelectorAll('#resultbar [data-view]').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.view === state.view);
-      b.setAttribute('aria-pressed', b.dataset.view === state.view ? 'true' : 'false');
-    });
+    syncViewSelect();
     renderYears();
     renderSeasons();
     applyTheme();
@@ -3938,29 +3979,26 @@
     }
 
     var q = state.q.trim();
-    var label;
+    var countText;
+    var labelText;
     if (state.tab === 'mine') {
-      label = '<b>' + list.length + '</b><span>部已看番剧</span>';
+      countText = String(list.length);
+      labelText = '部已看番剧';
     } else if (q) {
-      label = '<b>' + list.length + '</b><span>条全库搜索结果</span>';
+      countText = String(list.length);
+      labelText = '条全库搜索结果';
     } else if (state.year === 'all') {
-      label = '<b>' + list.length + '</b><span>部 · 全部年份' +
-        (state.season === 'all' ? ' · 全年' : ' · ' + state.season + '月季') + '</span>';
+      countText = String(list.length);
+      labelText = '部 · 全部年份' +
+        (state.season === 'all' ? ' · 全年' : ' · ' + state.season + '月季');
     } else {
-      label = '<b>' + list.length + '</b><span>部 · ' + state.year + '年' +
-        (state.season === 'all' ? '全年' : state.season + '月') + '</span>';
+      countText = String(list.length);
+      labelText = '部 · ' + state.year + '年' +
+        (state.season === 'all' ? '全年' : state.season + '月');
     }
-    var viewDefs = [['grid', '网格'], ['list', '列表'], ['board', '看板'], ['calendar', '日历']];
-    var viewHtml = '<div class="viewtoggle viewbar" id="viewSwitch" role="group" aria-label="视图">' +
-      viewDefs.map(function (v) {
-        var disabled = (v[0] === 'board' && state.tab !== 'mine') ||
-          (v[0] === 'calendar' && state.tab === 'mine');
-        var active = state.view === v[0];
-        return '<button type="button" data-view="' + v[0] + '"' +
-          (active ? ' class="active" aria-pressed="true"' : ' aria-pressed="false"') +
-          (disabled ? ' disabled' : '') + '>' + v[1] + '</button>';
-      }).join('') + '</div>';
-    $('resultbar').innerHTML = label + viewHtml;
+    $('resultCount').textContent = countText;
+    $('resultLabel').textContent = labelText;
+    syncViewSelect();
 
     var board = state.tab === 'mine' && state.view === 'board';
     var calendar = state.tab !== 'mine' && state.view === 'calendar';
@@ -3997,7 +4035,8 @@
     if (!list.length) {
       if (state.tab === 'mine') {
         if (!Object.keys(myMap).length) {
-          emptyEl.innerHTML = '<b>还没有加入任何番剧</b>切换到「全部番剧」，点击封面即可加入已看列表';
+          emptyEl.innerHTML = '<b>还没有加入任何番剧</b>切换到「全部番剧」，点击封面即可加入已看列表' +
+            '<br><button class="btn" id="browseAllBtn" type="button">去全部番剧</button>';
         } else if (q) {
           // 有收藏但被关键词筛空：给出准确文案并支持一键清除
           emptyEl.innerHTML = '<b>没有找到匹配的番剧</b>换个关键词试试' +
@@ -4352,18 +4391,18 @@
     toast('已清除筛选条件');
   });
 
-  $('resultbar').addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-view]');
-    if (!btn || btn.disabled) return;
-    setView(btn.dataset.view);
+  $('viewSelect').addEventListener('change', function () {
+    setView(this.value);
   });
 
   function setView(view) {
     if (['grid', 'list', 'board', 'calendar'].indexOf(view) < 0) return;
     if (view === 'board' && state.tab !== 'mine') view = 'grid';
     if (view === 'calendar' && state.tab === 'mine') view = 'grid';
-    // 再次点击看板/日历回到网格，保留原来的切换手感
-    if (view === state.view && (view === 'board' || view === 'calendar')) view = 'grid';
+    if (view === state.view) {
+      syncControls();
+      return;
+    }
     state.view = view;
     syncControls();
     render();
@@ -4377,10 +4416,22 @@
   });
   $('nowSeasonBtn').addEventListener('click', goNowSeason);
 
+  function syncAdvFilterToggle(open) {
+    var btn = $('advFilterToggle');
+    if (!btn) return;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '收起高级筛选' : '高级筛选';
+  }
+
   function openFilterSheet() {
     if (state.tab === 'mine') return;
     var sheet = $('filterSheet');
     if (!sheet || !sheet.hidden) return;
+    // 有高级条件生效时直接展开，避免用户以为筛选没生效
+    var advActive = state.platform !== 'all' || state.region !== 'all' ||
+      state.onlyMine || state.highScore || state.hideMine;
+    $('filters').classList.toggle('adv-open', advActive);
+    syncAdvFilterToggle(advActive);
     $('filterSheetBody').appendChild($('filters'));
     $('filters').classList.add('in-sheet');
     sheet.hidden = false;
@@ -4399,6 +4450,12 @@
     $('filterToggle').setAttribute('aria-expanded', 'false');
   }
 
+  $('advFilterToggle').addEventListener('click', function () {
+    var open = !$('filters').classList.contains('adv-open');
+    $('filters').classList.toggle('adv-open', open);
+    syncAdvFilterToggle(open);
+  });
+
   $('filterToggle').addEventListener('click', function () {
     if ($('filterSheet').hidden) openFilterSheet();
     else closeFilterSheet();
@@ -4415,6 +4472,23 @@
     var open = bar.classList.toggle('search-open');
     this.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) setTimeout(function () { searchEl.focus(); }, 30);
+  });
+
+  // ---- 离线提示：跟随 online / offline 事件，恢复后轻提示 ----
+  function setOffline(off) {
+    var bar = $('offlineBar');
+    if (!bar) return;
+    var wasOffline = !bar.hidden;
+    bar.hidden = !off;
+    if (wasOffline && !off) toast('网络已恢复');
+  }
+  window.addEventListener('offline', function () { setOffline(true); });
+  window.addEventListener('online', function () { setOffline(false); });
+  if (navigator.onLine === false) setOffline(true);
+
+  // 键盘用户跳过头部，直接把焦点交给列表
+  $('skipLink').addEventListener('click', function () {
+    gridEl.focus();
   });
 
   // ---- 头部“更多”菜单 ----
@@ -4725,6 +4799,11 @@
 
   // 空结果时一键清除筛选，回到最新年份的全量列表
   emptyEl.addEventListener('click', function (e) {
+    if (e.target.closest('#browseAllBtn')) {
+      setTab('all');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     var relax = e.target.closest('[data-empty-action]');
     if (relax) {
       var mod = emptyActions[Number(relax.dataset.emptyAction)];
@@ -5223,10 +5302,14 @@
   function openSettings() {
     syncSettingsUI();
     $('settingsModal').hidden = false;
+    var first = $('settingsModal').querySelector('button');
+    if (first) first.focus();
   }
 
   function closeSettings() {
     $('settingsModal').hidden = true;
+    var btn = $('moreBtn');
+    if (btn) btn.focus();
   }
 
   $('settingsModal').addEventListener('click', function (e) {
@@ -5331,8 +5414,33 @@
     $('help').hidden = false;
     $('helpClose').focus();
   });
-  $('helpClose').addEventListener('click', function () { $('help').hidden = true; });
-  document.querySelector('.help-mask').addEventListener('click', function () { $('help').hidden = true; });
+  $('helpClose').addEventListener('click', function () {
+    $('help').hidden = true;
+    $('helpBtn').focus();
+  });
+  document.querySelector('.help-mask').addEventListener('click', function () {
+    $('help').hidden = true;
+    $('helpBtn').focus();
+  });
+
+  // 通用弹窗焦点陷阱：Tab / Shift+Tab 在弹窗可操作元素间循环
+  function trapModalTab(container, e) {
+    var nodes = container.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    var focusables = [];
+    for (var i = 0; i < nodes.length; i += 1) {
+      if (!nodes[i].disabled && nodes[i].offsetParent !== null) focusables.push(nodes[i]);
+    }
+    if (!focusables.length) return;
+    var first = focusables[0];
+    var last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   document.addEventListener('keydown', function (e) {
     // 命令面板在最上层，Esc / 方向键由它自己处理，不要连带关闭背后的弹窗
@@ -5341,6 +5449,8 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         closeSettings();
+      } else if (e.key === 'Tab') {
+        trapModalTab($('settingsModal'), e);
       }
       return;
     }
@@ -5355,6 +5465,8 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         closeSync();
+      } else if (e.key === 'Tab') {
+        trapModalTab($('syncModal'), e);
       }
       return;
     }
@@ -5362,6 +5474,9 @@
       if (e.key === 'Escape' || e.key === '?') {
         e.preventDefault();
         $('help').hidden = true;
+        $('helpBtn').focus();
+      } else if (e.key === 'Tab') {
+        trapModalTab($('help'), e);
       }
       return;
     }
@@ -5380,22 +5495,7 @@
       }
       // 焦点陷阱：Tab 在弹窗内循环，避免焦点跑到背后的列表
       if (e.key === 'Tab') {
-        var nodes = modalEl.querySelectorAll('button, a[href], input, [tabindex]:not([tabindex="-1"])');
-        var focusables = [];
-        for (var fi = 0; fi < nodes.length; fi += 1) {
-          if (!nodes[fi].disabled && nodes[fi].offsetParent !== null) focusables.push(nodes[fi]);
-        }
-        if (focusables.length) {
-          var first = focusables[0];
-          var last = focusables[focusables.length - 1];
-          if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
+        trapModalTab(modalEl, e);
       }
       return;
     }
@@ -5404,6 +5504,7 @@
     if (e.key === '?' && !typing) {
       e.preventDefault();
       $('help').hidden = false;
+      $('helpClose').focus();
       return;
     }
     if (e.key === '/' && !typing) {
@@ -5708,7 +5809,8 @@
 
   function closeSync() {
     $('syncModal').hidden = true;
-    var btn = $('syncBtn');
+    // 回到实际可见的入口：我的番剧「更多」，否则头部「更多」
+    var btn = $('minebar').hidden ? $('moreBtn') : $('mineMoreBtn');
     if (btn) btn.focus();
   }
 
