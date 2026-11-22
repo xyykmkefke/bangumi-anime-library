@@ -2606,6 +2606,7 @@ async function main() {
             updatedStatus: map[ids.updated] && map[ids.updated].s,
             hasRemoved: !!map[ids.removed],
             pushedIds: pushed ? pushed.items.map((x) => String(x.id)) : null,
+            pushedUpdatedAt: pushed ? pushed.items.map((x) => Number(x.updatedAt) || 0) : null,
             pushedDeleted: pushed ? Object.keys(pushed.deleted || {}) : null,
           });
         })()`);
@@ -2629,9 +2630,45 @@ async function main() {
         Array.isArray(mergeState.pushedDeleted) && mergeState.pushedDeleted.length === 1,
       syncMerge,
     );
+    check(
+      '云同步回写包含最后修改时间',
+      Array.isArray(mergeState.pushedUpdatedAt) && mergeState.pushedUpdatedAt.length > 0 &&
+        mergeState.pushedUpdatedAt.every((t) => t > 0),
+      syncMerge,
+    );
 
     await cdp.send('Page.removeScriptToEvaluateOnNewDocument', {
       identifier: mockScript.result.identifier,
+    });
+
+    // 网络类失败（5xx）应自动进入退避重试队列；配置类错误（401）已在上面验证不重试
+    const retryMock = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const real = window.fetch.bind(window);
+        window.fetch = function (url) {
+          if (String(url).indexOf('api.github.com') >= 0) {
+            return Promise.resolve(new Response('{}', { status: 500 }));
+          }
+          return real.apply(this, arguments);
+        };
+      })();`,
+    });
+    await cdp.evaluate(
+      "localStorage.setItem('yuc_gist_v1', JSON.stringify({ token: 'ghp_mock', gistId: 'gist-mock', lastSync: 0 }))",
+    );
+    await cdp.send('Page.reload');
+
+    let retryStatus = '';
+    for (let i = 0; i < 40; i += 1) {
+      try {
+        retryStatus = await cdp.evaluate("document.getElementById('syncStatus').textContent");
+        if (/重试/.test(retryStatus)) break;
+      } catch {}
+      await sleep(300);
+    }
+    check('同步失败后自动排队重试', /10 秒后自动重试（1\/4）/.test(retryStatus), retryStatus);
+    await cdp.send('Page.removeScriptToEvaluateOnNewDocument', {
+      identifier: retryMock.result.identifier,
     });
 
     // 清空测试数据，避免污染用户清单
