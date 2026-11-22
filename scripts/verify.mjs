@@ -211,6 +211,9 @@ async function main() {
     const resultbar = await cdp.evaluate("document.getElementById('resultbar').textContent");
     check('结果栏显示当前季度统计', /\d+/.test(resultbar), resultbar.trim());
 
+    const dataStamp = await cdp.evaluate("document.getElementById('dataUpdated').textContent");
+    check('页脚显示数据更新时间', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(dataStamp), dataStamp);
+
     const firstTitle = await cdp.evaluate("document.querySelector('.card .title')?.textContent || ''");
     const firstId = await cdp.evaluate("document.querySelector('.card')?.dataset.id || ''");
     await cdp.evaluate("document.querySelector('.card').click()");
@@ -1329,6 +1332,33 @@ async function main() {
     }
     check('无偏好时主题跟随系统浅色', sysTheme === 'light', String(sysTheme));
 
+    const settingsInfo = await cdp.evaluate(`(async () => {
+      document.getElementById('moreBtn').click();
+      document.querySelector('[data-more="settings"]').click();
+      const modal = document.getElementById('settingsModal');
+      const open = !modal.hidden;
+      const before = parseFloat(getComputedStyle(document.body).fontSize);
+      document.querySelector('#fontSeg [data-font="lg"]').click();
+      const after = parseFloat(getComputedStyle(document.body).fontSize);
+      const storedFont = JSON.parse(localStorage.getItem('yuc_settings_v1') || '{}').font;
+      document.querySelector('#densitySeg [data-density="compact"]').click();
+      const density = document.documentElement.getAttribute('data-density');
+      document.querySelector('#motionSeg [data-motion="reduce"]').click();
+      const motion = document.documentElement.getAttribute('data-motion');
+      const active = document.querySelector('#fontSeg [data-font="lg"]').classList.contains('active');
+      document.querySelector('#fontSeg [data-font="md"]').click();
+      document.querySelector('#densitySeg [data-density="std"]').click();
+      document.querySelector('#motionSeg [data-motion="system"]').click();
+      document.getElementById('settingsClose').click();
+      return [open, after > before, storedFont, density, motion, active, modal.hidden,
+        document.documentElement.getAttribute('data-font')].join('|');
+    })()`);
+    check(
+      '字号、密度与动效设置生效并持久化',
+      settingsInfo === 'true|true|lg|compact|reduce|true|true|md',
+      settingsInfo,
+    );
+
     // 还原系统媒体模拟，避免影响后续检查
     await cdp.send('Emulation.setEmulatedMedia', { features: [] });
     await cdp.send('Page.reload');
@@ -1385,6 +1415,32 @@ async function main() {
         document.getElementById('empty').hidden].join('|');
     })()`);
     check('清除筛选后恢复列表', resetState === '|true|false|true', resetState);
+
+    // 零结果恢复：给出放宽建议，点击「清除搜索」后恢复
+    await cdp.evaluate(`(() => {
+      const input = document.getElementById('search');
+      input.value = 'zzzz-no-such-anime';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(500);
+    const recoveryInfo = await cdp.evaluate(`(async () => {
+      const empty = document.getElementById('empty');
+      const btns = [...empty.querySelectorAll('[data-empty-action]')];
+      const labels = btns.map((b) => b.textContent).join(' / ');
+      const qBtn = empty.querySelector('[data-empty-kind="q"]');
+      const before = document.querySelectorAll('#grid .card').length;
+      if (qBtn) qBtn.click();
+      await new Promise((r) => setTimeout(r, 500));
+      return [before, btns.length >= 1, labels.includes('清除搜索'),
+        empty.hidden, document.querySelectorAll('#grid .card').length > 0,
+        document.getElementById('search').value].join('|');
+    })()`);
+    check(
+      '零结果时给出一键放宽建议',
+      recoveryInfo === '0|true|true|true|true|',
+      recoveryInfo,
+    );
 
     // 只看已收藏：全部番剧页可收窄到个人收藏，再点一次恢复
     const onlyMineInfo = await cdp.evaluate(`(async () => {
@@ -1837,6 +1893,21 @@ async function main() {
       return [!!st, st.hidden, items.includes('export-json'), items.includes('sync')].join('|');
     })()`);
     check('头部更多菜单整合导出与同步', syncBits === 'true|true|true|true', syncBits);
+
+    const updateCheck = await cdp.evaluate(`(async () => {
+      const old = window.fetch;
+      window.fetch = async () => ({ ok: true, text: async () => '<meta name="version" content="9.9.9">' });
+      document.getElementById('moreBtn').click();
+      document.querySelector('[data-more="check-update"]').click();
+      await new Promise((r) => setTimeout(r, 120));
+      const msg = document.getElementById('toast').textContent;
+      const act = document.getElementById('toastAct');
+      const hasAction = !!act && act.textContent === '刷新';
+      window.fetch = old;
+      document.getElementById('toast').classList.remove('show');
+      return [msg.includes('9.9.9'), hasAction].join('|');
+    })()`);
+    check('检查更新可发现新版本', updateCheck === 'true|true', updateCheck);
 
     // 移动端横向溢出检查
     await cdp.send('Emulation.setDeviceMetricsOverride', {

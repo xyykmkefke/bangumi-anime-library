@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.6">
+<meta name="version" content="1.6.7">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1561,6 +1561,47 @@
   .help-panel { border-radius: 10px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); }
   .help-panel kbd { border-radius: 4px; }
 
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 12px;
+    font-size: 13px;
+  }
+  .setting-row > span { color: var(--muted); }
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active {
+    background: rgba(255, 107, 157, 0.16);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+  html[data-theme="light"] .seg button.active {
+    background: rgba(214, 63, 110, 0.12);
+    color: #a9254e;
+  }
+  .settings-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 14px;
+  }
+
   .toast {
     background: var(--panel);
     border: 1px solid var(--line-strong);
@@ -2213,6 +2254,39 @@
   }
   .sheet-head b { font-size: 15px; }
   body.sheet-open { overflow: hidden; }
+
+  /* 用户端设置：字号、卡片密度、动效 */
+  html[data-font="sm"] { --fs-body: 13px; }
+  html[data-font="lg"] { --fs-body: 16px; }
+  html[data-font="sm"] .title { font-size: 12.5px; }
+  html[data-font="lg"] .title { font-size: 15px; }
+  html[data-font="sm"] .meta,
+  html[data-font="sm"] .sub,
+  html[data-font="sm"] .resultbar span,
+  html[data-font="sm"] .hint { font-size: 11px; }
+  html[data-font="lg"] .meta,
+  html[data-font="lg"] .sub,
+  html[data-font="lg"] .resultbar span,
+  html[data-font="lg"] .hint { font-size: 13.5px; }
+  html[data-density="compact"] .grid:not(.list):not(.board):not(.cal):not(.timeline) {
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    gap: 10px;
+  }
+  html[data-motion="reduce"] *,
+  html[data-motion="reduce"] *::before,
+  html[data-motion="reduce"] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 10px 0 8px;
+  }
 </style>
 </head>
 <body>
@@ -2242,7 +2316,9 @@
       <button class="btn iconbtn" id="moreBtn" type="button" aria-label="更多操作" aria-expanded="false">⋯</button>
       <div class="popmenu" id="moreMenu" hidden>
         <button type="button" data-more="theme">切换主题</button>
+        <button type="button" data-more="settings">设置</button>
         <button type="button" data-more="help">键盘快捷键</button>
+        <button type="button" data-more="check-update">检查更新</button>
         <button type="button" data-more="palette">命令面板<kbd>Ctrl K</kbd></button>
         <button type="button" data-more="calendar">本季日历</button>
         <hr>
@@ -2370,7 +2446,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.6</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.7</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2419,6 +2495,40 @@
       <li><kbd>长按</kbd><span>快捷菜单；Ctrl K 打开命令面板</span></li>
     </ul>
     <button class="btn primary" id="helpClose" type="button">知道了</button>
+  </div>
+</div>
+
+<div class="help" id="settingsModal" hidden>
+  <div class="help-mask" data-settings-close></div>
+  <div class="help-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <h2>设置</h2>
+    <div class="setting-row">
+      <span>字号</span>
+      <div class="seg" id="fontSeg">
+        <button type="button" data-font="sm">小</button>
+        <button type="button" data-font="md">标准</button>
+        <button type="button" data-font="lg">大</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span>卡片密度</span>
+      <div class="seg" id="densitySeg">
+        <button type="button" data-density="std">标准</button>
+        <button type="button" data-density="compact">紧凑</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span>动效</span>
+      <div class="seg" id="motionSeg">
+        <button type="button" data-motion="system">跟随系统</button>
+        <button type="button" data-motion="reduce">减少</button>
+      </div>
+    </div>
+    <p class="hint">设置只保存在本机，不参与云同步。</p>
+    <div class="settings-actions">
+      <button class="btn" id="settingsReset" type="button">恢复默认</button>
+      <button class="btn primary" id="settingsClose" type="button">完成</button>
+    </div>
   </div>
 </div>
 
@@ -2477,6 +2587,36 @@
   var DIRTY_KEY = 'yuc_dirty_v1';
   var WARN_KEY = 'yuc_backup_warn_v1';
   var DEL_KEY = 'yuc_deleted_v1';
+  var SETTINGS_KEY = 'yuc_settings_v1';
+  var SETTINGS_DEFAULT = { font: 'md', density: 'std', motion: 'system' };
+  var settings = { font: 'md', density: 'std', motion: 'system' };
+
+  function applySettings() {
+    var root = document.documentElement;
+    root.setAttribute('data-font', settings.font);
+    root.setAttribute('data-density', settings.density);
+    root.setAttribute('data-motion', settings.motion);
+  }
+
+  function loadSettings() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+      if (saved) {
+        if (['sm', 'md', 'lg'].indexOf(saved.font) >= 0) settings.font = saved.font;
+        if (['std', 'compact'].indexOf(saved.density) >= 0) settings.density = saved.density;
+        if (['system', 'reduce'].indexOf(saved.motion) >= 0) settings.motion = saved.motion;
+      }
+    } catch (e) { /* 忽略损坏的设置 */ }
+    applySettings();
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
+
+  loadSettings();
   var GIST_KEY = 'yuc_gist_v1';
   var GIST_FILE = 'yuc-anime-list.json';
   var DEL_MAX_AGE = 180 * 24 * 60 * 60 * 1000;
@@ -2558,6 +2698,7 @@
     if (rest) $('loadMoreBtn').textContent = '还有 ' + rest + ' 部 · 显示更多';
   }
   var emptyEl = $('empty');
+  var emptyActions = [];
   var toastEl = $('toast');
   var toastTimer = null;
 
@@ -3708,6 +3849,56 @@
     menu.innerHTML = html;
   }
 
+  // 零结果恢复：逐项放宽一个条件，给出「还有多少部」并支持一键应用
+  function countWithFilters(mod) {
+    var backup = {};
+    var keys = Object.keys(mod);
+    keys.forEach(function (k) { backup[k] = state[k]; state[k] = mod[k]; });
+    var n = 0;
+    try {
+      n = filteredList().length;
+    } finally {
+      keys.forEach(function (k) { state[k] = backup[k]; });
+    }
+    return n;
+  }
+
+  function emptyRecoveryActions() {
+    var out = [];
+    var q = state.q.trim();
+    function add(key, label, mod) {
+      var n = countWithFilters(mod);
+      if (n > 0) out.push({ key: key, label: label, mod: mod, n: n });
+    }
+    if (q) add('q', '清除搜索「' + q + '」', { q: '' });
+    if (state.year !== 'all') {
+      if (state.season !== 'all') add('season', '切到 ' + state.year + ' 全年', { season: 'all' });
+      add('year', '切到全部年份', { year: 'all', season: 'all' });
+    }
+    if (state.genre !== 'all') add('genre', '去掉题材「' + (GENRE_LABEL[state.genre] || state.genre) + '」', { genre: 'all' });
+    if (state.region !== 'all') add('region', '去掉地区限制', { region: 'all' });
+    if (state.platform !== 'all') add('platform', '去掉类型限制', { platform: 'all' });
+    if (state.highScore) add('highScore', '去掉高分限制', { highScore: false });
+    if (state.status !== 'all') add('status', '查看全部状态', { status: 'all' });
+    return out.slice(0, 4);
+  }
+
+  function renderEmptyRecovery() {
+    var cands = emptyRecoveryActions();
+    emptyActions = cands.map(function (c) { return c.mod; });
+    if (!cands.length) {
+      emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>换个关键词或年份试试' +
+        '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+      return;
+    }
+    emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>试试只放宽一个条件：' +
+      '<div class="empty-actions">' + cands.map(function (c, i) {
+        return '<button class="btn" type="button" data-empty-action="' + i + '" data-empty-kind="' + c.key + '">' +
+          escapeHtml(c.label) + ' · ' + c.n + ' 部</button>';
+      }).join('') + '</div>' +
+      '<button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+  }
+
   function render() {
     // 状态筛选只在「我的番剧」或搜索时生效，其他场景静默清掉，避免出现无效条件
     if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
@@ -3802,6 +3993,7 @@
     }
     updateLoadMore(list.length, shown.length, !grouped && !board && !calendar);
     emptyEl.hidden = list.length > 0;
+    emptyActions = [];
     if (!list.length) {
       if (state.tab === 'mine') {
         if (!Object.keys(myMap).length) {
@@ -3825,8 +4017,7 @@
           ? '<b>全库数据加载失败</b>网络较慢或 CDN 不可用 <button class="btn" id="retryFull" type="button">重新加载</button>'
           : '<b>全库数据正在加载</b>最近一年已可用，稍候即可浏览其他年份';
       } else if (DATA.length) {
-        emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>换个年份或关键词试试' +
-          '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+        renderEmptyRecovery();
       } else {
         emptyEl.innerHTML = '<b>数据还在生成中</b>请稍后刷新页面';
       }
@@ -4261,6 +4452,8 @@
     closeMenus();
     var act = btn.dataset.more;
     if (act === 'theme') $('themeBtn').click();
+    else if (act === 'settings') openSettings();
+    else if (act === 'check-update') checkUpdate();
     else if (act === 'help') $('helpBtn').click();
     else if (act === 'palette') openPalette();
     else if (act === 'calendar') setView('calendar');
@@ -4532,6 +4725,16 @@
 
   // 空结果时一键清除筛选，回到最新年份的全量列表
   emptyEl.addEventListener('click', function (e) {
+    var relax = e.target.closest('[data-empty-action]');
+    if (relax) {
+      var mod = emptyActions[Number(relax.dataset.emptyAction)];
+      if (mod) {
+        Object.keys(mod).forEach(function (k) { state[k] = mod[k]; });
+        syncControls();
+        render();
+      }
+      return;
+    }
     if (e.target.closest('#retryFull')) {
       loadFullData();
       render();
@@ -5005,6 +5208,67 @@
 
   $('themeBtn').addEventListener('click', toggleTheme);
 
+  function syncSettingsUI() {
+    [['font', 'fontSeg'], ['density', 'densitySeg'], ['motion', 'motionSeg']].forEach(function (pair) {
+      var seg = $(pair[1]);
+      if (!seg) return;
+      seg.querySelectorAll('[data-' + pair[0] + ']').forEach(function (btn) {
+        var on = btn.getAttribute('data-' + pair[0]) === settings[pair[0]];
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    });
+  }
+
+  function openSettings() {
+    syncSettingsUI();
+    $('settingsModal').hidden = false;
+  }
+
+  function closeSettings() {
+    $('settingsModal').hidden = true;
+  }
+
+  $('settingsModal').addEventListener('click', function (e) {
+    if (e.target.closest('[data-settings-close]') || e.target.closest('#settingsClose')) {
+      closeSettings();
+      return;
+    }
+    if (e.target.closest('#settingsReset')) {
+      settings.font = SETTINGS_DEFAULT.font;
+      settings.density = SETTINGS_DEFAULT.density;
+      settings.motion = SETTINGS_DEFAULT.motion;
+      applySettings();
+      saveSettings();
+      syncSettingsUI();
+      toast('已恢复默认设置');
+      return;
+    }
+    var fontBtn = e.target.closest('#fontSeg [data-font]');
+    if (fontBtn) {
+      settings.font = fontBtn.getAttribute('data-font');
+      applySettings();
+      saveSettings();
+      syncSettingsUI();
+      return;
+    }
+    var densityBtn = e.target.closest('#densitySeg [data-density]');
+    if (densityBtn) {
+      settings.density = densityBtn.getAttribute('data-density');
+      applySettings();
+      saveSettings();
+      syncSettingsUI();
+      return;
+    }
+    var motionBtn = e.target.closest('#motionSeg [data-motion]');
+    if (motionBtn) {
+      settings.motion = motionBtn.getAttribute('data-motion');
+      applySettings();
+      saveSettings();
+      syncSettingsUI();
+    }
+  });
+
   $('modalClose').addEventListener('click', closeDetail);
   document.querySelector('.modal-mask').addEventListener('click', closeDetail);
   $('detailSimilar').addEventListener('click', function (e) {
@@ -5073,6 +5337,13 @@
   document.addEventListener('keydown', function (e) {
     // 命令面板在最上层，Esc / 方向键由它自己处理，不要连带关闭背后的弹窗
     if (!paletteEl.hidden) return;
+    if (!$('settingsModal').hidden) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSettings();
+      }
+      return;
+    }
     if (!$('filterSheet').hidden) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -5753,6 +6024,63 @@
         : '最近一年 ' + DATA.length + ' 部 · 全库加载中…');
   }
 
+  // 页脚展示数据快照时间（本地时区），让用户知道数据新鲜度
+  function renderDataUpdated() {
+    var el = $('dataUpdated');
+    if (!el) return;
+    var ts = META && META.generatedAt;
+    var d = ts ? new Date(ts) : null;
+    if (!d || isNaN(d.getTime())) {
+      el.textContent = '时间未知';
+      return;
+    }
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    el.textContent = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    el.title = 'Bangumi 数据快照：' + ts;
+  }
+
+  function cmpVersion(a, b) {
+    var pa = String(a).split('.');
+    var pb = String(b).split('.');
+    for (var i = 0; i < 3; i += 1) {
+      var x = parseInt(pa[i], 10) || 0;
+      var y = parseInt(pb[i], 10) || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+
+  // 检查更新：拉取同源 HTML 的版本号，有新版本时给出刷新入口
+  function checkUpdate() {
+    toast('正在检查更新…');
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 10000) : null;
+    var opts = { cache: 'no-store' };
+    if (ctrl) opts.signal = ctrl.signal;
+    fetch(location.pathname + '?check=' + Date.now(), opts)
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        if (timer) clearTimeout(timer);
+        var m = html.match(/<meta\s+name="version"\s+content="([^"]+)"/i);
+        if (!m) throw new Error('missing version');
+        var curEl = document.querySelector('meta[name="version"]');
+        var cur = curEl ? curEl.getAttribute('content') : '0.0.0';
+        if (cmpVersion(m[1], cur) > 0) {
+          toast('发现新版本 v' + m[1], { label: '刷新', fn: function () { location.reload(); } });
+        } else {
+          toast('已是最新版本 v' + cur);
+        }
+      })
+      .catch(function () {
+        if (timer) clearTimeout(timer);
+        toast(navigator.onLine === false ? '当前离线，联网后再检查' : '检查更新失败，请稍后再试');
+      });
+  }
+
   // 首屏之后补齐完整数据：优先走 jsDelivr（比 Pages 快数倍），失败再回退本站
   var fullState = fullReady ? 'ready' : 'idle';
   var fullTry = 0;
@@ -5783,6 +6111,7 @@
     render();
     window.scrollTo(0, keepY);
     updateDataHint();
+    renderDataUpdated();
     $('loadBar').hidden = true;
     window.__FULL_DATA_READY = true;
     // 首屏没找到的深链目标，在全库补齐后补开详情
@@ -5862,6 +6191,7 @@
   render();
   if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();
+  renderDataUpdated();
   if (!fullReady) {
     if ('requestIdleCallback' in window) {
       window.requestIdleCallback(function () { loadFullData(); }, { timeout: 1200 });
