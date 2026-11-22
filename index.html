@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0d0f14">
-<meta name="version" content="1.1.0">
+<meta name="version" content="1.2.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1797,6 +1797,251 @@
     .filters.expanded .row2::-webkit-scrollbar { display: none; }
     .filters.expanded .row2 > * { flex: 0 0 auto; }
   }
+  /* ===== v1.2 视觉改版：冷静工具风（单强调色 / 细边框 / 低圆角 / 无渐变玻璃） ===== */
+  :root {
+    --bg: #0a0b0d;
+    --panel: #111216;
+    --panel-2: #17181d;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --text: #eceef2;
+    --muted: #a2a8b4;
+    --muted-2: #8d94a2;
+    --pink: #7c86e8;
+    --purple: #7c86e8;
+    --gold: #d8c38a;
+    --grad: #5e6ad2;
+    --accent: #7c86e8;
+    --accent-soft: rgba(124, 134, 232, 0.14);
+  }
+
+  html[data-theme="light"] {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #f0f1f4;
+    --line: rgba(16, 18, 24, 0.09);
+    --line-strong: rgba(16, 18, 24, 0.2);
+    --text: #17191f;
+    --muted: #4d5361;
+    --muted-2: #5c6373;
+    --pink: #4f5bd5;
+    --purple: #4f5bd5;
+    --gold: #8a6d1f;
+    --grad: #4f5bd5;
+    --accent: #4f5bd5;
+    --accent-soft: rgba(79, 91, 213, 0.1);
+  }
+
+  html, body { background: var(--bg); }
+  body { background-image: none; }
+
+  header {
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    -webkit-text-fill-color: var(--text);
+  }
+
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  .topbar { padding: 12px 0 10px; gap: 14px; }
+  .search input { height: 36px; border-radius: 7px; font-size: 13.5px; }
+  .search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .searchhist { border-radius: 8px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); }
+  .hchip { border-radius: 5px; }
+  .hchip:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+  .hclear:hover, .hdel:hover { color: var(--accent); }
+
+  .tabs { background: transparent; border: 0; padding: 0; gap: 2px; }
+  .tab { border-radius: 6px; padding: 7px 11px; color: var(--muted); }
+  .tab:hover { background: var(--panel-2); color: var(--text); }
+  .tab.active {
+    background: var(--panel-2);
+    color: var(--text);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .filters { gap: 8px; padding-bottom: 10px; }
+  .pill { border-radius: 6px; height: 28px; padding: 0 9px; font-size: 12px; background: transparent; }
+  .pill:hover { background: var(--panel-2); }
+  .pill.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 500;
+  }
+  select { height: 30px; border-radius: 5px; background: var(--panel-2); font-size: 12.5px; }
+
+  .btn { height: 30px; padding: 0 11px; border-radius: 6px; font-size: 12.5px; }
+  .btn:hover { background: var(--panel); border-color: var(--line-strong); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger:hover { border-color: rgba(220, 90, 90, 0.6); color: #e88; background: var(--panel); }
+
+  .viewtoggle { background: transparent; border: 0; padding: 0; gap: 2px; }
+  .viewtoggle button { border-radius: 5px; font-size: 12px; }
+  .viewtoggle button.active {
+    background: var(--panel-2);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  main { padding: 16px 0 80px; }
+  .resultbar { margin-bottom: 12px; }
+  .resultbar b { color: var(--text); font-size: 13px; font-weight: 600; }
+  .resultbar span { font-size: 12px; }
+  .minebar { border-radius: 8px; padding: 10px 12px; gap: 8px; }
+  .minebar .stat { font-size: 12.5px; }
+  .minebar .stat b { font-size: 15px; }
+
+  .grid { gap: 14px; }
+  .card { border-radius: 8px; background: var(--panel); }
+  .card:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--line-strong);
+    background: var(--panel-2);
+  }
+  .card.picked { border-color: var(--accent); box-shadow: none; }
+  .card.picked:hover { border-color: var(--accent); }
+  .cover { background: #0c0d10; }
+  .cover::before { animation: none; opacity: 0; background: none; }
+  .badge {
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 3px 6px;
+    background: rgba(8, 9, 11, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .score { color: #f2f3f5; }
+  .score.none { color: #b6bcc8; }
+  .plat { color: #c6cbd5; }
+  .badge.status { display: inline-flex; align-items: center; gap: 5px; color: #c9ced8; }
+  .badge.status::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .badge.status.s-want { color: #c9ced8; }
+  .badge.status.s-doing { color: #9db7ff; }
+  .badge.status.s-done { color: #9fd8b2; }
+  .badge.status.s-drop { color: #c6a3a3; }
+
+  .body { padding: 11px 12px 12px; }
+  .title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; }
+  .sub { font-size: 12px; }
+  .meta { font-size: 12px; letter-spacing: 0.01em; }
+  .ctools { margin-top: 9px; }
+  .ctool { height: 28px; border-radius: 5px; font-size: 12.5px; background: var(--panel-2); color: var(--text); }
+  .ctool:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .ctool.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .cprog { font-size: 12.5px; }
+  .cprog b { font-size: 13px; }
+  .cprog button { width: 28px; height: 28px; border-radius: 5px; background: var(--panel-2); font-size: 15px; }
+  .cprog button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .board-col { border-radius: 8px; background: var(--panel); }
+  .tl-head { font-size: 12.5px; }
+  .tl-head span { font-size: 11.5px; }
+
+  .modal-mask { background: rgba(4, 5, 7, 0.7); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .modal-panel { border-radius: 10px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5); }
+  .modal-panel h2 { font-size: 17px; letter-spacing: -0.01em; }
+  .modal-sub { font-size: 12px; }
+  .detail-cover { border-radius: 6px; background: #0c0d10; }
+  .detail-meta .chip { border-radius: 4px; background: var(--panel-2); font-size: 11.5px; padding: 3px 7px; }
+  .status-opts { gap: 6px; }
+  .status-opts button { height: 34px; border-radius: 5px; font-size: 12.5px; }
+  .status-opts button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .sim-card { border-radius: 5px; background: transparent; }
+  .sim-card:hover { background: var(--panel-2); }
+  .sim-card .sim-title { font-size: 12px; font-weight: 500; }
+  .modal-actions .btn { height: 32px; }
+
+  .cardmenu { border-radius: 8px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35); }
+  .cardmenu-title { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .cardmenu-opts button, .cardmenu-detail { border-radius: 5px; font-size: 12px; background: transparent; }
+  .cardmenu-opts button:hover, .cardmenu-detail:hover { background: var(--panel-2); border-color: var(--line-strong); color: var(--text); }
+  .cardmenu-opts button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .help-mask { background: rgba(4, 5, 7, 0.7); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .help-panel { border-radius: 10px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); }
+  .help-panel kbd { border-radius: 4px; }
+
+  .toast {
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    font-size: 12.5px;
+  }
+  .totop { width: 38px; height: 38px; border-radius: 7px; background: var(--panel); box-shadow: none; }
+  .totop:hover { border-color: var(--accent); color: var(--accent); }
+
+  footer { border-top: 1px solid var(--line); font-size: 12px; }
+
+  .title mark, #modalTitle mark {
+    background: var(--accent-soft);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  ::-webkit-scrollbar-thumb { background: #2b2e35; }
+
+  html[data-theme="light"] header { background: var(--bg); }
+  html[data-theme="light"] .totop { background: #fff; color: var(--text); }
+  html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #c9ced8; }
+  html[data-theme="light"] .title mark,
+  html[data-theme="light"] #modalTitle mark { background: var(--accent-soft); color: var(--text); }
+  html[data-theme="light"] .pill.active,
+  html[data-theme="light"] .ctool.on,
+  html[data-theme="light"] .ctool:hover,
+  html[data-theme="light"] .cprog button:hover:not(:disabled),
+  html[data-theme="light"] .status-opts button.active,
+  html[data-theme="light"] .cardmenu-opts button.active,
+  html[data-theme="light"] .viewtoggle button.active,
+  html[data-theme="light"] .hchip:hover { color: var(--accent); border-color: var(--accent); }
+  html[data-theme="light"] .resultbar b { color: var(--text); }
+
+  @media (max-width: 640px) {
+    .btn { height: 32px; }
+    .ctool, .cprog button { height: 32px; }
+    .cprog button { width: 32px; }
+  }
+
 </style>
 </head>
 <body>
@@ -1804,7 +2049,7 @@
 <header>
   <div class="wrap">
     <div class="topbar">
-      <h1>番剧库</h1>
+      <h1><span class="brand-mark">番</span>番剧库</h1>
       <div class="search">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
           <circle cx="11" cy="11" r="7"></circle>
@@ -1893,7 +2138,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.1.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.2.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2712,7 +2957,7 @@
         (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +
         (x.p ? '<span class="badge plat">' + escapeHtml(x.p) + '</span>' : '') +
         (entry
-          ? '<span class="badge status">' + escapeHtml(STATUS[entry.s] || '看完') + '</span>'
+          ? '<span class="badge status s-' + escapeHtml(entry.s || 'done') + '">' + escapeHtml(STATUS[entry.s] || '看完') + '</span>'
           : '') +
       '</div>' +
       '<div class="body">' +
