@@ -2,7 +2,9 @@
 
 本地优先的番剧浏览与追番清单。内置 Bangumi 1990–2026 年季度番剧数据，无需账号、无需后端，开箱即用。
 
-当前版本：**v1.2.0**
+当前版本：**v1.3.0**
+
+在线使用：<https://xyykmkefke.github.io/bangumi-anime-library/>
 
 ## 功能
 
@@ -15,6 +17,16 @@
 - **分享**：详情深链、复制链接、系统分享、复制当前筛选视图链接
 - **数据**：JSON / CSV / Markdown 导出，JSON 导入合并与无效条目提示，备份时间提醒
 - **体验**：冷静工具风视觉、明暗主题（可跟随系统）、键盘快捷键、移动端适配、回到顶部、PWA 离线缓存
+
+## 装到手机 / 桌面
+
+**iOS（Safari）**：打开在线地址 → 分享 → **添加到主屏幕**，之后从桌面图标全屏启动，图标为紫色「番」。
+
+**Android（Chrome）**：地址栏右侧菜单 → 安装应用。
+
+**桌面（Chrome / Edge）**：地址栏右侧安装图标。
+
+PWA 依赖 HTTPS，双击本地 `index.html`（`file://`）无法注册 Service Worker，只能浏览不能安装。
 
 ## 快速开始
 
@@ -49,6 +61,7 @@ python -m http.server 8080
 ├── sw.js                   # Service Worker
 ├── manifest.webmanifest    # PWA 配置
 ├── icon.svg
+├── icons/                  # iOS/Android PNG 图标（180/192/512）
 ├── package.json
 └── LICENSE
 ```
@@ -65,6 +78,7 @@ npm run fetch-data   # 重新抓取数据
 
 ## 版本
 
+- v1.3.0：iOS PWA 适配（apple-touch-icon / 全屏 meta / 状态栏配色跟随主题），GitHub Pages 在线部署
 - v1.2.0：视觉改版为冷静工具风，单强调色、细边框、低圆角，移除渐变/玻璃/发光
 - v1.1.0：卡片直加/移出、我的番剧内设置观看进度、明暗模式可读性优化
 - v1.0.0：首个正式版本，完整的浏览、搜索、追番清单、导入导出与 PWA 能力

@@ -1481,6 +1481,50 @@ async function main() {
     }
     check('Service Worker 注册成功', swReg === true);
 
+    // iOS 添加到主屏幕：PNG 图标、全屏 meta、状态栏样式需齐备
+    const iosInfo = await cdp.evaluate(`(async () => {
+      const icon = document.querySelector('link[rel="apple-touch-icon"]');
+      const capable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+      const bar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      const types = [];
+      for (const href of ['icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png']) {
+        const res = await fetch(href);
+        types.push(res.ok ? res.headers.get('content-type') : 'fail');
+      }
+      // 状态栏样式需与当前主题一致：亮色用 default，暗色用 black-translucent
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      const barOk = bar && bar.getAttribute('content') === (light ? 'default' : 'black-translucent');
+      return [
+        barOk ? 'ok' : 'bad',
+        icon ? icon.getAttribute('href') : '',
+        capable ? capable.getAttribute('content') : '',
+        types.join(','),
+      ].join('|');
+    })()`);
+    check(
+      'iOS 主屏幕图标与全屏配置可用',
+      iosInfo === 'ok|icons/icon-180.png|yes|image/png,image/png,image/png',
+      iosInfo,
+    );
+
+    // 切换主题时，浏览器地址栏与 iOS 状态栏配色需同步
+    const themeSync = await cdp.evaluate(`(async () => {
+      const btn = document.getElementById('themeBtn');
+      const meta = document.querySelector('meta[name="theme-color"]');
+      const bar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      const before = document.documentElement.getAttribute('data-theme');
+      btn.click();
+      await new Promise((r) => setTimeout(r, 200));
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      const ok = meta.getAttribute('content') === (light ? '#f6f7f9' : '#0a0b0d')
+        && bar.getAttribute('content') === (light ? 'default' : 'black-translucent');
+      btn.click();
+      await new Promise((r) => setTimeout(r, 200));
+      const restored = document.documentElement.getAttribute('data-theme') === before;
+      return [ok, restored].join('|');
+    })()`);
+    check('状态栏与浏览器配色跟随主题', themeSync === 'true|true', themeSync);
+
     // 本地存储被禁用时应给出明确提示
     const blocked = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
       source: "Object.defineProperty(window, 'localStorage', { configurable: true, get: function () { throw new Error('blocked'); } });",

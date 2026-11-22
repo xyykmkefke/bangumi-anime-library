@@ -1,6 +1,6 @@
 // 应用壳离线缓存：页面与数据网络优先，封面图片缓存优先
-var CACHE = 'yuc-anime-shell-v4';
-var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './data/anime-data.js'];
+var CACHE = 'yuc-anime-shell-v5';
+var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-data.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
