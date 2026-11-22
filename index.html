@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0d0f14">
-<meta name="version" content="1.0.0">
+<meta name="version" content="1.1.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -18,8 +18,8 @@
     --line: rgba(255, 255, 255, 0.07);
     --line-strong: rgba(255, 255, 255, 0.16);
     --text: #e9ecf3;
-    --muted: #8b93a7;
-    --muted-2: #6b7385;
+    --muted: #a6aec0;
+    --muted-2: #8a93a8;
     --pink: #ff6b9d;
     --purple: #8b7bff;
     --gold: #ffd479;
@@ -152,7 +152,7 @@
     white-space: nowrap;
     border: 1px solid var(--line);
     background: var(--panel-2);
-    color: #d6dbe8;
+    color: var(--text);
     font-size: 12px;
     padding: 4px 9px;
     border-radius: 7px;
@@ -302,13 +302,13 @@
   }
 
   select {
-    height: 32px;
+    height: 34px;
     padding: 0 8px;
     border-radius: 9px;
     border: 1px solid var(--line);
     background: var(--panel);
-    color: #d6dbe8;
-    font-size: 12.5px;
+    color: var(--text);
+    font-size: 13px;
     outline: none;
     cursor: pointer;
   }
@@ -318,7 +318,7 @@
   .spacer { flex: 1; }
 
   .hint {
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--muted-2);
     white-space: nowrap;
   }
@@ -768,7 +768,7 @@
     border-radius: 10px;
     border: 1px solid var(--line);
     background: var(--panel-2);
-    color: #d9deea;
+    color: var(--text);
     font-size: 13px;
     cursor: pointer;
     transition: 0.15s;
@@ -1029,8 +1029,8 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     background: var(--panel-2);
-    color: #cfd6e6;
-    font-size: 11.5px;
+    color: var(--text);
+    font-size: 12.5px;
   }
 
   .detail-meta .chip i {
@@ -1089,18 +1089,18 @@
   .minebar .stat b { color: var(--text); font-size: 16px; }
 
   .btn {
-    height: 32px;
-    padding: 0 12px;
+    height: 34px;
+    padding: 0 13px;
     border-radius: 9px;
     border: 1px solid var(--line);
     background: var(--panel-2);
-    color: #d9deea;
-    font-size: 12.5px;
+    color: var(--text);
+    font-size: 13px;
     cursor: pointer;
     transition: 0.15s;
   }
 
-  .btn:hover { border-color: var(--line-strong); background: #232836; }
+  .btn:hover { border-color: var(--line-strong); background: var(--panel); }
   .btn.primary { background: var(--grad); border-color: transparent; color: #fff; font-weight: 600; }
   .btn.danger:hover { border-color: rgba(255, 92, 92, 0.6); color: #ff9b9b; }
 
@@ -1416,9 +1416,9 @@
   .badge {
     position: absolute;
     z-index: 2;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1;
-    padding: 4px 6px;
+    padding: 4px 7px;
     border-radius: 6px;
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -1432,7 +1432,7 @@
     font-weight: 700;
   }
 
-  .score.none { color: #8b93a7; font-weight: 500; }
+  .score.none { color: #c3cad9; font-weight: 500; }
 
   .plat {
     top: 8px;
@@ -1492,8 +1492,8 @@
     --line: rgba(24, 28, 40, 0.10);
     --line-strong: rgba(24, 28, 40, 0.22);
     --text: #1b1f29;
-    --muted: #5c6478;
-    --muted-2: #7b8396;
+    --muted: #444d61;
+    --muted-2: #5c6478;
   }
 
   html[data-theme="light"] body {
@@ -1505,7 +1505,21 @@
   html[data-theme="light"] header { background: rgba(245, 246, 251, 0.86); }
   html[data-theme="light"] .continue-item { background: rgba(255, 255, 255, 0.72); }
   html[data-theme="light"] .rcol.zero .rfill { background: #d9dde7; }
-  html[data-theme="light"] .sub { color: #6f7789; }
+  html[data-theme="light"] .sub { color: #5a6376; }
+  html[data-theme="light"] :focus-visible { outline-color: #c2255c; }
+  html[data-theme="light"] .resultbar b,
+  html[data-theme="light"] .pill.active,
+  html[data-theme="light"] .status-opts button.active,
+  html[data-theme="light"] .viewtoggle button.active,
+  html[data-theme="light"] .cardmenu-opts button.active,
+  html[data-theme="light"] .ctool.on,
+  html[data-theme="light"] .ctool:hover,
+  html[data-theme="light"] .cprog button:hover:not(:disabled),
+  html[data-theme="light"] .detail-meta .chipjump,
+  html[data-theme="light"] .hclear:hover,
+  html[data-theme="light"] .hdel:hover { color: #b0135a; }
+  html[data-theme="light"] .title mark,
+  html[data-theme="light"] #modalTitle mark { color: #1b1f29; background: rgba(255, 107, 157, 0.28); }
   html[data-theme="light"] .modal-mask { background: rgba(20, 24, 35, 0.36); }
   html[data-theme="light"] .cardmenu-opts button,
   html[data-theme="light"] .cardmenu-detail { color: #2a3040; }
@@ -1583,9 +1597,9 @@
   }
 
   .sub {
-    margin-top: 3px;
-    font-size: 11px;
-    color: #7d8599;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1593,41 +1607,82 @@
   }
 
   .meta {
-    margin-top: 3px;
-    font-size: 11px;
+    margin-top: 4px;
+    font-size: 12px;
     color: var(--muted-2);
   }
 
-  /* 已看进度条：卡片上一眼看清追到哪了 */
-  .pbar {
-    margin-top: 6px;
-    height: 3px;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.1);
-    overflow: hidden;
+  /* 卡片底部工具条：直接加入/移出，我的番剧内直接调进度 */
+  .ctools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    flex-wrap: wrap;
   }
 
-  .pbar i {
-    display: block;
-    height: 100%;
-    border-radius: 2px;
-    background: linear-gradient(90deg, #7c5cff, #ff6b9d);
+  .ctool {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: 0.15s;
   }
 
-  html[data-theme="light"] .pbar { background: rgba(30, 34, 45, 0.12); }
+  .ctool:hover {
+    border-color: rgba(255, 107, 157, 0.55);
+    color: #ffa8c6;
+  }
 
-  /* 卡片上展示的个人备注，单行省略 */
-  .note {
-    margin-top: 4px;
-    padding: 3px 6px;
-    border-left: 2px solid rgba(255, 107, 157, 0.5);
-    border-radius: 0 5px 5px 0;
-    background: rgba(255, 107, 157, 0.07);
-    font-size: 11px;
-    color: #b7bfd0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .ctool.on {
+    border-color: rgba(255, 107, 157, 0.45);
+    background: rgba(255, 107, 157, 0.12);
+    color: #ffa8c6;
+  }
+
+  .cprog {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12.5px;
     white-space: nowrap;
+  }
+
+  .cprog b {
+    color: var(--text);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cprog button {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .cprog button:hover:not(:disabled) {
+    border-color: rgba(255, 107, 157, 0.55);
+    color: #ffa8c6;
+  }
+
+  .cprog button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .loadmore {
@@ -1641,7 +1696,7 @@
   .empty {
     padding: 80px 20px;
     text-align: center;
-    color: var(--muted-2);
+    color: var(--muted);
   }
 
   .empty .btn { margin-top: 14px; }
@@ -1712,7 +1767,7 @@
     padding: 30px 0 calc(40px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--line);
     color: var(--muted-2);
-    font-size: 12px;
+    font-size: 12.5px;
     text-align: center;
   }
 
@@ -1838,7 +1893,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.0.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.1.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -1958,16 +2013,17 @@
   var toastEl = $('toast');
   var toastTimer = null;
 
-  // 兼容旧版数据：数字表示加入时间，视为「看完」；进度/评分/备注字段已随功能移除
+  // 兼容旧版数据：数字表示加入时间，视为「看完」；保留观看进度
   function normalizeEntry(v) {
     if (v == null) return null;
     if (typeof v === 'object') {
       return {
         s: STATUS[v.s] ? v.s : 'done',
-        t: Number(v.t) || Date.now()
+        t: Number(v.t) || Date.now(),
+        ep: Math.max(0, Math.round(Number(v.ep) || 0))
       };
     }
-    return { s: 'done', t: Number(v) || Date.now() };
+    return { s: 'done', t: Number(v) || Date.now(), ep: 0 };
   }
 
   function loadMine() {
@@ -2625,7 +2681,8 @@
 
   function cardHtml(x) {
     var id = String(x.i);
-    var picked = !!myMap[id];
+    var entry = myMap[id];
+    var picked = !!entry;
     var q = state.q.trim();
     var titleText = x.cn || x.n || '未知番剧';
     // 无封面时以番名首字占位（跳过开头的括号/引号），便于离线或封面失效时辨认
@@ -2634,8 +2691,19 @@
     var sub = x.cn && x.n && x.cn !== x.n ? highlightHtml(x.n, q) : '';
     var score = x.s ? Number(x.s).toFixed(1) : '';
     var meta = [x.d, x.e ? x.e + '话' : ''].filter(Boolean).join(' · ');
+    var ep = entry ? Math.max(0, Number(entry.ep) || 0) : 0;
+    var total = Number(x.e) || 0;
+    var prog = state.tab === 'mine' && entry
+      ? '<div class="cprog" title="观看进度">' +
+          '<button type="button" data-act="epminus"' + (ep <= 0 ? ' disabled' : '') +
+            ' aria-label="减少一话">−</button>' +
+          '<span><b>' + ep + '</b>' + (total ? ' / ' + total : '') + ' 话</span>' +
+          '<button type="button" data-act="epplus"' + (total > 0 && ep >= total ? ' disabled' : '') +
+            ' aria-label="增加一话">＋</button>' +
+        '</div>'
+      : '';
 
-    return '<button class="card' + (picked ? ' picked' : '') + '" data-id="' + id + '" aria-pressed="' + picked + '" title="' + escapeHtml(titleText) + '">' +
+    return '<div class="card' + (picked ? ' picked' : '') + '" data-id="' + id + '" role="button" tabindex="0" aria-pressed="' + picked + '" title="' + escapeHtml(titleText) + '">' +
       '<div class="cover' + (x.img ? '' : ' noimg') + '">' +
         (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
           (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
@@ -2643,17 +2711,21 @@
         '<span class="ph">' + escapeHtml(initial) + '</span>' +
         (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +
         (x.p ? '<span class="badge plat">' + escapeHtml(x.p) + '</span>' : '') +
-        (myMap[id]
-          ? '<span class="badge status">' + escapeHtml(STATUS[myMap[id].s] || '看完') + '</span>'
+        (entry
+          ? '<span class="badge status">' + escapeHtml(STATUS[entry.s] || '看完') + '</span>'
           : '') +
-        '<span class="tick">✓</span>' +
       '</div>' +
       '<div class="body">' +
         '<div class="title">' + title + '</div>' +
         '<div class="sub">' + sub + '</div>' +
         '<div class="meta">' + escapeHtml(meta) + '</div>' +
+        '<div class="ctools">' +
+          '<button class="ctool' + (picked ? ' on' : '') + '" type="button" data-act="toggle">' +
+            (picked ? '移出' : '＋ 加入') + '</button>' +
+          prog +
+        '</div>' +
       '</div>' +
-    '</button>';
+    '</div>';
   }
 
   // 按年份季度分组，便于回顾「什么时候追了什么」；可切换按首播季度或按加入年份
@@ -2955,6 +3027,37 @@
     render();
   }
 
+  // 卡片直接加入 / 移出，不打开详情
+  function toggleMine(id) {
+    var item = byId.get(id);
+    if (!item) return;
+    if (myMap[id]) {
+      delete myMap[id];
+      toast('已移出我的番剧：' + (item.cn || item.n));
+    } else {
+      myMap[id] = { s: 'want', t: Date.now(), ep: 0 };
+      toast('已加入我的番剧：' + (item.cn || item.n));
+    }
+    saveMine();
+    render();
+  }
+
+  // 我的番剧内直接调整进度；追到最后一话自动转为看完
+  function changeEp(id, delta) {
+    var item = byId.get(id);
+    var entry = myMap[id];
+    if (!item || !entry) return;
+    var total = Number(item.e) || 0;
+    var next = Math.max(0, Math.min(total > 0 ? total : 9999, (Number(entry.ep) || 0) + delta));
+    if (next === entry.ep) return;
+    entry.ep = next;
+    if (total > 0 && next >= total) entry.s = 'done';
+    else if (entry.s === 'done') entry.s = 'doing';
+    else if (next > 0 && entry.s === 'want') entry.s = 'doing';
+    saveMine();
+    render();
+  }
+
   // 事件绑定
   document.querySelectorAll('.tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -3213,6 +3316,16 @@
   });
 
   gridEl.addEventListener('click', function (e) {
+    var act = e.target.closest('[data-act]');
+    if (act) {
+      var actCard = act.closest('.card');
+      if (!actCard) return;
+      var actId = actCard.dataset.id;
+      if (act.dataset.act === 'toggle') toggleMine(actId);
+      else if (act.dataset.act === 'epplus') changeEp(actId, 1);
+      else if (act.dataset.act === 'epminus') changeEp(actId, -1);
+      return;
+    }
     var card = e.target.closest('.card');
     if (!card) return;
     // 长按刚结束时浏览器只会补一个 click，拦下这一次即可，避免误开详情
@@ -3220,6 +3333,15 @@
       suppressClick = false;
       if (Date.now() - lastLongPress < 700) return;
     }
+    openDetail(card.dataset.id);
+  });
+
+  // 卡片改为 div 后需自行处理 Enter / 空格打开详情
+  gridEl.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var card = e.target.closest('.card');
+    if (!card || e.target !== card) return;
+    e.preventDefault();
     openDetail(card.dataset.id);
   });
 
@@ -3270,6 +3392,7 @@
 
   gridEl.addEventListener('pointerdown', function (e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target.closest('[data-act]')) return;
     var card = e.target.closest('.card');
     if (!card) return;
     clearTimeout(pressTimer);
@@ -3394,7 +3517,7 @@
       delete myMap[id];
       toast('已移除：' + (item.cn || item.n));
     } else {
-      myMap[id] = { s: 'done', t: Date.now() };
+      myMap[id] = { s: 'want', t: Date.now(), ep: 0 };
       toast('已加入我的番剧：' + (item.cn || item.n));
     }
     saveMine();
@@ -3600,7 +3723,7 @@
   $('exportBtn').addEventListener('click', function () {
     var ids = Object.keys(myMap).map(function (id) {
       var entry = myMap[id] || {};
-      return { id: Number(id), status: entry.s || 'done', addedAt: entry.t || 0 };
+      return { id: Number(id), status: entry.s || 'done', addedAt: entry.t || 0, ep: entry.ep || 0 };
     });
     var payload = {
       app: 'yuc-anime-list',
@@ -3614,14 +3737,14 @@
   });
 
   $('exportCsv').addEventListener('click', function () {
-    var rows = [['条目ID', '中文名', '原名', '类型', '地区', '首播', '总话数', '状态', '加入时间']];
+    var rows = [['条目ID', '中文名', '原名', '类型', '地区', '首播', '总话数', '状态', '已看', '加入时间']];
     sortedMine().forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
       if (!x || !e) return;
       rows.push([
         id, x.cn || '', x.n || '', x.p || '', x.g || '', x.d || '', x.e || '',
-        STATUS[e.s] || '看完', new Date(e.t || Date.now()).toLocaleString('zh-CN'),
+        STATUS[e.s] || '看完', e.ep || 0, new Date(e.t || Date.now()).toLocaleString('zh-CN'),
       ]);
     });
     var csv = '\ufeff' + rows.map(function (r) {
@@ -3639,15 +3762,16 @@
       '',
       '共 ' + ids.length + ' 部 · 导出于 ' + new Date().toLocaleString('zh-CN'),
       '',
-      '| 番名 | 状态 | 首播 |',
-      '| --- | --- | --- |',
+      '| 番名 | 状态 | 进度 | 首播 |',
+      '| --- | --- | --- | --- |',
     ];
     ids.forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
       if (!x || !e) return;
       var name = '[' + String(x.cn || x.n || '未知').replace(/\|/g, '\\|') + '](https://bgm.tv/subject/' + id + ')';
-      lines.push('| ' + name + ' | ' + (STATUS[e.s] || '看完') + ' | ' + (x.d || '—') + ' |');
+      var prog = (e.ep || 0) + (x.e ? ' / ' + x.e : '');
+      lines.push('| ' + name + ' | ' + (STATUS[e.s] || '看完') + ' | ' + prog + ' | ' + (x.d || '—') + ' |');
     });
     download('我的番剧-' + stamp() + '.md', lines.join('\n'), 'text/markdown;charset=utf-8');
     markBackup();
@@ -3672,13 +3796,15 @@
           var id = String(isObj ? entry.id : entry);
           if (!byId.has(id)) { skipped += 1; return; }
           var status = isObj && STATUS[entry.status] ? entry.status : 'done';
+          var ep = Math.max(0, Math.round(Number(isObj && entry.ep) || 0));
           var cur = myMap[id];
           if (!cur) {
-            myMap[id] = { s: status, t: (isObj && entry.addedAt) || (Date.now() + index) };
+            myMap[id] = { s: status, t: (isObj && entry.addedAt) || (Date.now() + index), ep: ep };
             added += 1;
             return;
           }
-          // 已有条目保留本地状态与加入时间，只统计合并数量
+          // 已有条目保留本地状态与加入时间，进度取较大值
+          cur.ep = Math.max(Number(cur.ep) || 0, ep);
           merged += 1;
         });
         saveMine();

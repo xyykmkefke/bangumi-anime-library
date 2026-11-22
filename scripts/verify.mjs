@@ -238,7 +238,35 @@ async function main() {
       return [document.querySelectorAll('.tab')[0].classList.contains('active'),
         badge ? badge.textContent.trim() : ''].join('|');
     })()`);
-    check('全部番剧页显示已收藏状态徽章', allTabBadge === 'true|看完', allTabBadge);
+    check('全部番剧页显示已收藏状态徽章', allTabBadge === 'true|想看', allTabBadge);
+
+    // 卡片直加/移出：不打开详情即可操作，操作后详情保持关闭
+    const cardToggle = await cdp.evaluate(`(async () => {
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const card = cards.find((c) => c.dataset.id !== ${JSON.stringify(firstId)});
+      if (!card) return 'no-card';
+      const id = card.dataset.id;
+      const labelBefore = card.querySelector('[data-act="toggle"]').textContent;
+      card.querySelector('[data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 250));
+      const stored = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const afterCard = document.querySelector('#grid .card[data-id="' + id + '"]');
+      const added = !!stored[id] && afterCard.classList.contains('picked');
+      const addedLabel = afterCard.querySelector('[data-act="toggle"]').textContent;
+      const modalClosed1 = document.getElementById('modal').hidden;
+      afterCard.querySelector('[data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 250));
+      const stored2 = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      return [
+        labelBefore, added, addedLabel, !stored2[id], modalClosed1,
+        document.getElementById('modal').hidden,
+      ].join('|');
+    })()`);
+    check(
+      '卡片可直接加入与移出番剧',
+      cardToggle === '＋ 加入|true|移出|true|true|true',
+      cardToggle,
+    );
 
     // 搜索：用首张卡片标题的前两个字做查询
     const keyword = String(firstTitle).slice(0, 2);
@@ -963,6 +991,40 @@ async function main() {
     })()`);
     check('详情显示加入时间', joinedInfo === '7|true|true', joinedInfo);
 
+    // 我的番剧卡片内直接调进度：+2 后显示 2 / 总话数，−1 回退，详情保持关闭
+    const progInfo = await cdp.evaluate(`(async () => {
+      const storedBefore = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const card = [...document.querySelectorAll('#grid .card')].find((c) => {
+        const it = window.ANIME_DATA.find((x) => String(x.i) === c.dataset.id);
+        const entry = storedBefore[c.dataset.id];
+        return it && Number(it.e) >= 5 && entry && entry.s !== 'drop';
+      });
+      if (!card) return 'no-card';
+      const id = card.dataset.id;
+      const before = Number(storedBefore[id].ep) || 0;
+      card.querySelector('[data-act="epplus"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      document.querySelector('#grid .card[data-id="' + id + '"] [data-act="epplus"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const nowCard = document.querySelector('#grid .card[data-id="' + id + '"]');
+      const text = nowCard.querySelector('.cprog').textContent;
+      const entry = JSON.parse(localStorage.getItem('yuc_my_anime_v1'))[id];
+      const modalClosed = document.getElementById('modal').hidden;
+      nowCard.querySelector('[data-act="epminus"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const entry2 = JSON.parse(localStorage.getItem('yuc_my_anime_v1'))[id];
+      return [before, entry.ep, entry.s, /2\\s*\\/\\s*\\d+\\s*话/.test(text),
+        modalClosed, entry2.ep].join('|');
+    })()`);
+    const progParts = progInfo.split('|');
+    check(
+      '我的番剧卡片可直接设置观看进度',
+      progParts.length === 6 && Number(progParts[1]) === Number(progParts[0]) + 2 &&
+        progParts[2] === 'doing' && progParts[3] === 'true' && progParts[4] === 'true' &&
+        Number(progParts[5]) === Number(progParts[0]) + 1,
+      progInfo,
+    );
+
     // 切回全部番剧，准备验证深链与分享
     await cdp.evaluate("document.querySelectorAll('.tab')[0].click(); true");
     await sleep(400);
@@ -1120,6 +1182,50 @@ async function main() {
       '明暗主题切换并持久化',
       themeInfo === 'light|true|light|light|☀|dark',
       themeInfo,
+    );
+
+    // 可读性：暗色与亮色下，次要文字/按钮文字的对比度均不低于 4.5
+    const contrastInfo = await cdp.evaluate(`(() => {
+      const rgb = (s) => (s.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = (c) => {
+        const a = c.map((v) => {
+          const x = v / 255;
+          return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+      };
+      const bgOf = (el) => {
+        let n = el;
+        while (n) {
+          const b = getComputedStyle(n).backgroundColor;
+          if (b && !/rgba\\(0, 0, 0, 0\\)/.test(b)) return b;
+          n = n.parentElement;
+        }
+        return 'rgb(255, 255, 255)';
+      };
+      const ratio = (el) => {
+        const f = lum(rgb(getComputedStyle(el).color));
+        const b = lum(rgb(bgOf(el)));
+        return (Math.max(f, b) + 0.05) / (Math.min(f, b) + 0.05);
+      };
+      const els = [
+        document.querySelector('#grid .card .meta'),
+        document.getElementById('copyViewBtn'),
+        document.querySelector('#resultbar span'),
+        document.querySelector('.hint'),
+      ].filter(Boolean);
+      const measure = () => Math.min.apply(null, els.map(ratio));
+      const dark = measure();
+      document.getElementById('themeBtn').click();
+      const light = measure();
+      document.getElementById('themeBtn').click();
+      return [dark.toFixed(2), light.toFixed(2)].join('|');
+    })()`);
+    const contrastParts = contrastInfo.split('|').map(Number);
+    check(
+      '明暗主题下次要文字对比度达标',
+      contrastParts.length === 2 && contrastParts[0] >= 4.5 && contrastParts[1] >= 4.5,
+      contrastInfo,
     );
 
     // 系统主题：清掉偏好与 hash 后，模拟系统浅色，初始主题应跟随
