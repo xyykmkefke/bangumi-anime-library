@@ -195,6 +195,9 @@ async function main() {
     }
     check('完整数据在首屏后补齐', fullReady === true);
 
+    const pyReady = await cdp.evaluate("!!(window.ANIME_DATA || []).find((x) => x.py)");
+    check('完整数据包含拼音首字母字段', pyReady === true);
+
     const jsErrors = cdp.events.filter(
       (e) =>
         e.method === 'Runtime.exceptionThrown' ||
