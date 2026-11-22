@@ -4,6 +4,7 @@
 
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import path from 'node:path';
+import { buildLite } from './build-lite.mjs';
 
 const BASE = 'https://bgmapi.anibt.net';
 const START_YEAR = 1990;
@@ -169,6 +170,8 @@ async function main() {
 
   const content = `// 由 scripts/fetch-bangumi.mjs 生成，请勿手动修改\nwindow.ANIME_META = ${JSON.stringify(meta)};\nwindow.ANIME_DATA = ${JSON.stringify(all)};\n`;
   await writeFile(outFile, content, 'utf8');
+  // 同步刷新首屏轻量数据，避免 fetch 后 lite 过期
+  await buildLite();
 
   console.log(`完成：本次新抓取 ${fetched} 个季度，共 ${all.length} 部，输出 ${outFile}`);
 }

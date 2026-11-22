@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>番剧库 · 我的追番</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preload" as="script" href="data/anime-lite.js" fetchpriority="high">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS 添加到主屏幕：图标必须是 PNG，capable 决定是否全屏运行 -->
@@ -16,7 +17,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.4.0">
+<meta name="version" content="1.5.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2171,7 +2172,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.4.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.5.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2245,14 +2246,24 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="data/anime-data.js"></script>
+<script src="data/anime-lite.js"></script>
 <script>
 (function () {
   'use strict';
 
-  var DATA = (window.ANIME_DATA || []).filter(function (x) { return x.d; });
   var META = window.ANIME_META || {};
-  var byId = new Map(DATA.map(function (x) { return [String(x.i), x]; }));
+  // 首屏只加载最近一年，完整数据在首屏渲染后异步补齐
+  var fullReady = !window.ANIME_LITE;
+  var DATA = [];
+  var byId = new Map();
+
+  function adoptData() {
+    DATA = (window.ANIME_DATA || []).filter(function (x) { return x.d; });
+    byId = new Map(DATA.map(function (x) { return [String(x.i), x]; }));
+  }
+
+  adoptData();
+  window.__FULL_DATA_READY = fullReady;
   var STORAGE_KEY = 'yuc_my_anime_v1';
   var PREFS_KEY = 'yuc_prefs_v1';
   var HIST_KEY = 'yuc_search_hist_v1';
@@ -3238,6 +3249,8 @@
       } else if (state.hideMine) {
         emptyEl.innerHTML = '<b>这个范围内没有未收藏的番剧</b>关闭「隐藏已收藏」即可看到已收藏条目' +
           '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
+      } else if (!fullReady) {
+        emptyEl.innerHTML = '<b>全库数据正在加载</b>最近一年已可用，稍候即可浏览其他年份';
       } else if (DATA.length) {
         emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>换个年份或关键词试试' +
           '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
@@ -4566,6 +4579,33 @@
   });
   syncToTop();
 
+  function updateDataHint() {
+    var el = $('dataHint');
+    if (!el) return;
+    if (!DATA.length) { el.textContent = '数据未就绪'; return; }
+    el.textContent = fullReady
+      ? '共 ' + DATA.length + ' 部 · ' + (META.startYear || '') + '–' + (META.endYear || '')
+      : '最近一年 ' + DATA.length + ' 部 · 全库加载中…';
+  }
+
+  // 首屏之后补齐完整数据：先让最近一年可见，再后台换入全库并重绘
+  function loadFullData() {
+    if (fullReady) { window.__FULL_DATA_READY = true; return; }
+    var s = document.createElement('script');
+    s.src = 'data/anime-data.js';
+    s.async = true;
+    s.onload = function () {
+      fullReady = true;
+      adoptData();
+      fillFilterOptions();
+      syncControls();
+      render();
+      updateDataHint();
+      window.__FULL_DATA_READY = true;
+    };
+    document.head.appendChild(s);
+  }
+
   renderYears();
   renderSeasons();
   fillFilterOptions();
@@ -4581,9 +4621,14 @@
   syncControls();
   render();
   if (initialDetail) openDetail(initialDetail);
-  $('dataHint').textContent = DATA.length
-    ? '共 ' + DATA.length + ' 部 · ' + (META.startYear || '') + '–' + (META.endYear || '')
-    : '数据未就绪';
+  updateDataHint();
+  if (!fullReady) {
+    if ('requestIdleCallback' in window) {
+      window.requestIdleCallback(function () { loadFullData(); }, { timeout: 1200 });
+    } else {
+      setTimeout(loadFullData, 300);
+    }
+  }
   if (!canStore) {
     $('storageWarn').hidden = false;
   }

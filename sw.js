@@ -1,6 +1,6 @@
-// 应用壳离线缓存：页面与数据网络优先，封面图片缓存优先
-var CACHE = 'yuc-anime-shell-v6';
-var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-data.js'];
+// 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
+var CACHE = 'yuc-anime-shell-v7';
+var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
@@ -43,18 +43,41 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // 页面壳与数据：网络优先，离线时回退缓存
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // 页面本身：网络优先；1.5s 内没回来就先展示缓存，等下次启动再用新版
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      caches.match(req).then(function (hit) {
+        var net = fetch(req).then(function (res) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          return res;
+        }).catch(function () {
+          return hit || caches.match('./index.html');
+        });
+        if (!hit) return net;
+        var timer = new Promise(function (resolve) {
+          setTimeout(function () { resolve(hit); }, 1500);
+        });
+        return Promise.race([net, timer]);
+      })
+    );
+    return;
+  }
+
+  // 数据与静态资源：立即用缓存，后台拉新版本供下次使用
   e.respondWith(
-    fetch(req).then(function (res) {
-      var copy = res.clone();
-      caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
-      return res;
-    }).catch(function () {
-      return caches.match(req).then(function (hit) {
-        return hit || caches.match('./index.html');
+    caches.match(req).then(function (hit) {
+      var net = fetch(req).then(function (res) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+        return res;
+      }).catch(function () {
+        return hit;
       });
+      return hit || net;
     })
   );
 });

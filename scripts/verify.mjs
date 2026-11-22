@@ -159,6 +159,21 @@ async function main() {
     await cdp.send('Runtime.enable');
     await cdp.send('Page.enable');
 
+    // 每次刷新后等待完整数据补齐，避免分层加载影响后续断言
+    const sendRaw = cdp.send;
+    cdp.send = async (method, params = {}) => {
+      const res = await sendRaw(method, params);
+      if (method === 'Page.reload') {
+        for (let i = 0; i < 80; i += 1) {
+          try {
+            if (await cdp.evaluate('window.__FULL_DATA_READY === true')) break;
+          } catch {}
+          await sleep(100);
+        }
+      }
+      return res;
+    };
+
     // 等待首页渲染
     let cards = 0;
     for (let i = 0; i < 80; i += 1) {
@@ -168,6 +183,17 @@ async function main() {
       } catch {}
       await sleep(250);
     }
+
+    // 首屏只加载最近一年，完整数据应在首屏之后补齐
+    let fullReady = false;
+    for (let i = 0; i < 60; i += 1) {
+      try {
+        fullReady = await cdp.evaluate('window.__FULL_DATA_READY === true');
+        if (fullReady) break;
+      } catch {}
+      await sleep(200);
+    }
+    check('完整数据在首屏后补齐', fullReady === true);
 
     const jsErrors = cdp.events.filter(
       (e) =>

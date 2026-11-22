@@ -2,7 +2,7 @@
 
 本地优先的番剧浏览与追番清单。内置 Bangumi 1990–2026 年季度番剧数据，无需账号、无需后端，开箱即用。
 
-当前版本：**v1.4.0**
+当前版本：**v1.5.0**
 
 在线使用：<https://xyykmkefke.github.io/bangumi-anime-library/>
 
@@ -19,6 +19,7 @@
 - **云同步**：可选接入 GitHub Gist（仅 gist 权限 Token），多设备自动双向合并；删除用墓碑同步，不会“复活”已移出的番剧
 - **备份提醒**：累计 5 处改动后提示导出，并显示待备份改动数
 - **体验**：冷静工具风视觉、明暗主题（可跟随系统）、键盘快捷键、移动端适配、回到顶部、PWA 离线缓存
+- **加载**：首屏只加载最近一年，全库在首屏后异步补齐；Service Worker 缓存优先，二次打开近乎瞬时
 
 ## 装到手机 / 桌面
 
@@ -65,9 +66,11 @@ python -m http.server 8080
 ```
 .
 ├── index.html              # 单页应用（样式与逻辑内联）
-├── data/anime-data.js      # 内置番剧数据
+├── data/anime-data.js      # 内置番剧数据（全库）
+├── data/anime-lite.js      # 首屏轻量数据（最近一年，由脚本生成）
 ├── scripts/
-│   ├── fetch-bangumi.mjs   # 抓取并生成数据
+│   ├── fetch-bangumi.mjs   # 抓取并生成数据（同时刷新 lite）
+│   ├── build-lite.mjs      # 生成首屏轻量数据
 │   ├── check-data.mjs      # 数据质量校验
 │   └── verify.mjs          # 端到端验收（本地服务 + 无头浏览器）
 ├── sw.js                   # Service Worker
@@ -82,6 +85,7 @@ python -m http.server 8080
 
 ```bash
 npm run check-data   # 数据质量校验
+npm run build-lite   # 重新生成首屏轻量数据
 npm run verify       # 端到端验收，需要本机安装 Edge 或 Chrome
 npm run fetch-data   # 重新抓取数据
 ```
@@ -90,6 +94,7 @@ npm run fetch-data   # 重新抓取数据
 
 ## 版本
 
+- v1.5.0：移动端加载优化——首屏只取最近一年（110 KB，gzip 约 30 KB），全库后台补齐；Service Worker 改为缓存优先，二次打开接近瞬时
 - v1.4.0：新增 GitHub Gist 云同步（双向合并 + 删除墓碑）与累计改动备份提醒
 - v1.3.0：iOS PWA 适配（apple-touch-icon / 全屏 meta / 状态栏配色跟随主题），GitHub Pages 在线部署
 - v1.2.0：视觉改版为冷静工具风，单强调色、细边框、低圆角，移除渐变/玻璃/发光
