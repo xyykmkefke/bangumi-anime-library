@@ -962,6 +962,24 @@ async function main() {
       longPressInfo,
     );
 
+    // 卡片「⋯」按钮：点击后菜单应保持展开，而不是被全局「点击外部」立即收起
+    const menuBtnInfo = await cdp.evaluate(`(async () => {
+      const card = document.querySelector('#grid .card');
+      if (!card) return 'no-card';
+      const btn = card.querySelector('[data-act="menu"]');
+      if (!btn) return 'no-btn';
+      const menu = document.getElementById('cardMenu');
+      menu.hidden = true;
+      btn.click();
+      await new Promise((r) => setTimeout(r, 150));
+      const opened = !menu.hidden;
+      const title = document.getElementById('cardMenuTitle').textContent;
+      const opts = document.querySelectorAll('#cardMenuOpts [data-status]').length;
+      menu.hidden = true;
+      return [opened, title !== '', opts].join('|');
+    })()`);
+    check('卡片「⋯」按钮可打开快捷菜单', menuBtnInfo === 'true|true|4', menuBtnInfo);
+
     // 长按菜单「移出我的番剧」：删除收藏后从列表消失，随后恢复以免影响后续断言
     const removeInfo = await cdp.evaluate(`(async () => {
       const card = document.querySelector('#grid .card');
@@ -1805,6 +1823,24 @@ async function main() {
       '移动端筛选默认收起',
       collapsedParts[0] !== 'none' && collapsedParts[1] === 'none',
       collapsedState,
+    );
+
+    // 手机端卡片仍需直接显示加入/移出按钮，不能只依赖长按菜单
+    const mobileToggle = await cdp.evaluate(`(() => {
+      const card = document.querySelector('#grid .card');
+      if (!card) return 'no-card';
+      const btn = card.querySelector('[data-act="toggle"]');
+      if (!btn) return 'no-btn';
+      const style = getComputedStyle(btn);
+      return [style.display, btn.offsetParent !== null,
+        Math.round(btn.getBoundingClientRect().height), btn.textContent.trim()].join('|');
+    })()`);
+    const mtParts = mobileToggle.split('|');
+    check(
+      '手机端卡片显示加入/移出按钮',
+      mtParts[0] !== 'none' && mtParts[1] === 'true' && Number(mtParts[2]) >= 44 &&
+        /加入|移出/.test(mtParts[3] || ''),
+      mobileToggle,
     );
 
     await cdp.evaluate("document.getElementById('filterToggle').click(); true");

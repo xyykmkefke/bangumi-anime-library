@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.3">
+<meta name="version" content="1.6.4">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1824,7 +1824,6 @@
   }
   @media (max-width: 640px) {
     .grid:not(.mine-mode) .card .ctools { opacity: 1; pointer-events: auto; }
-    .grid:not(.mine-mode) .card .ctools [data-act="toggle"] { display: none; }
   }
   .card .ctool.icon {
     width: 30px;
@@ -2309,7 +2308,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.3</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.4</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4501,7 +4500,12 @@
       if (kind === 'toggle') toggleMine(actId);
       else if (kind === 'epplus') changeEp(actId, 1);
       else if (kind === 'epminus') changeEp(actId, -1);
-      else if (kind === 'menu') openCardMenu(actCard);
+      else if (kind === 'menu') {
+        // 阻止继续冒泡到 document 的「点击外部关闭」，否则菜单刚打开就被收起
+        e.stopPropagation();
+        closeMenus();
+        openCardMenu(actCard);
+      }
       else if (kind === 'select') {
         if (bulkSel[actId]) delete bulkSel[actId];
         else bulkSel[actId] = true;
