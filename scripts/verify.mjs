@@ -49,7 +49,8 @@ function startServer() {
       let pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
       if (pathname === '/') pathname = '/index.html';
       const file = path.join(ROOT, pathname);
-      if (!file.startsWith(ROOT)) throw new Error('forbidden');
+      const rel = path.relative(ROOT, file);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('forbidden');
       const data = await readFile(file);
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
@@ -2561,6 +2562,7 @@ async function main() {
                 items: [
                   { id: Number(ids[0]), status: 'done', addedAt: 1, ep: 12, updatedAt: now },
                   { id: Number(ids[1]), status: 'drop', addedAt: 1, ep: 0, updatedAt: now },
+                  { id: 990000001, status: 'want', addedAt: 1, ep: 3, updatedAt: now },
                 ],
                 deleted: { [ids[2]]: now },
               }) } },
@@ -2608,6 +2610,7 @@ async function main() {
             pushedIds: pushed ? pushed.items.map((x) => String(x.id)) : null,
             pushedUpdatedAt: pushed ? pushed.items.map((x) => Number(x.updatedAt) || 0) : null,
             pushedDeleted: pushed ? Object.keys(pushed.deleted || {}) : null,
+            unknownKept: pushed ? pushed.items.some((x) => String(x.id) === '990000001') : false,
           });
         })()`);
         const state = JSON.parse(syncMerge);
@@ -2626,8 +2629,13 @@ async function main() {
     );
     check(
       '云同步把合并结果回写 Gist',
-      Array.isArray(mergeState.pushedIds) && mergeState.pushedIds.length === 2 &&
+      Array.isArray(mergeState.pushedIds) && mergeState.pushedIds.length === 3 &&
         Array.isArray(mergeState.pushedDeleted) && mergeState.pushedDeleted.length === 1,
+      syncMerge,
+    );
+    check(
+      '云同步保留首屏数据之外的远端旧番',
+      mergeState.unknownKept === true,
       syncMerge,
     );
     check(
@@ -2670,6 +2678,35 @@ async function main() {
     await cdp.send('Page.removeScriptToEvaluateOnNewDocument', {
       identifier: retryMock.result.identifier,
     });
+
+    // 冷启动深链：首屏轻量数据只有最近一年，指向旧番的 d 参数应在全库补齐后打开
+    await cdp.evaluate("localStorage.removeItem('yuc_gist_v1')");
+    const coldId = await cdp.evaluate(`(() => {
+      const end = String((window.ANIME_META || {}).endYear || '');
+      const old = (window.ANIME_DATA || []).find((x) => x.d && String(x.d).slice(0, 4) !== end);
+      return old ? String(old.i) : '';
+    })()`);
+    await cdp.evaluate(`location.hash = '#d=' + ${JSON.stringify(coldId)}`);
+    await cdp.send('Page.reload');
+    let coldNote = '';
+    let coldOk = false;
+    for (let i = 0; i < 60; i += 1) {
+      try {
+        coldNote = await cdp.evaluate(`(() => {
+          const d = new URLSearchParams(location.hash.slice(1)).get('d') || '';
+          const href = document.getElementById('detailLink').getAttribute('href') || '';
+          return [
+            window.__FULL_DATA_READY === true,
+            document.getElementById('modal').hidden ? 'closed' : 'open',
+            d,
+            href.split('/').pop(),
+          ].join('|');
+        })()`);
+        if (coldNote === 'true|open|' + coldId + '|' + coldId) { coldOk = true; break; }
+      } catch {}
+      await sleep(250);
+    }
+    check('冷启动深链在全库补齐后打开', coldOk, coldNote);
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");

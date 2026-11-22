@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>番剧库 · 我的追番</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://gcore.jsdelivr.net https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://gist.githubusercontent.com https://gcore.jsdelivr.net https://cdn.jsdelivr.net; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="preload" as="script" href="data/anime-lite.js" fetchpriority="high">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -20,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.2">
+<meta name="version" content="1.6.3">
 <style>
   :root {
     --bg: #0d0f14;
@@ -392,313 +393,6 @@
     opacity: 0.75;
   }
 
-  /* 收藏统计概览 */
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
-  }
-
-  .stats[hidden] { display: none; }
-
-  .stat-card {
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--panel);
-  }
-
-  .stat-card span {
-    display: block;
-    font-size: 11.5px;
-    color: var(--muted-2);
-    margin-bottom: 4px;
-  }
-
-  .stat-card b {
-    font-size: 17px;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* 个人评分分布 */
-  .ratingboard {
-    margin-bottom: 14px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--panel);
-  }
-
-  .ratingboard[hidden] { display: none; }
-
-  .ratingboard-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 10px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-
-  .ratingboard-head b { color: var(--text); font-size: 13px; }
-
-  .ratingbars {
-    display: flex;
-    align-items: flex-end;
-    gap: 6px;
-    height: 96px;
-  }
-
-  .rcol {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
-    height: 100%;
-  }
-
-  .rcol .rfill {
-    width: 100%;
-    min-height: 2px;
-    border-radius: 4px 4px 0 0;
-    background: linear-gradient(180deg, #ff6b9d, #8b7bff);
-    transition: height 0.25s;
-  }
-
-  .rcol.zero .rfill { background: #262b38; }
-
-  .rcol .rn { font-size: 10.5px; color: var(--muted-2); }
-  .rcol .rv { font-size: 10.5px; color: var(--muted); }
-
-  .rating-empty {
-    font-size: 12.5px;
-    color: var(--muted-2);
-    padding: 6px 0 2px;
-  }
-
-  /* 年度回顾：按首播年份汇总收藏 */
-  .yearreview {
-    margin-bottom: 14px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--panel);
-  }
-
-  .yearreview[hidden] { display: none; }
-
-  .yr-pills {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin: 0 0 10px;
-  }
-
-  .review-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 10px;
-  }
-
-  .review-fav {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 9px 11px;
-    border: 1px solid rgba(255, 107, 157, 0.3);
-    border-radius: 10px;
-    background: rgba(255, 107, 157, 0.08);
-    font-family: inherit;
-    font-size: 12.5px;
-    color: var(--muted);
-    text-align: left;
-    width: 100%;
-    cursor: pointer;
-    transition: background 0.18s, border-color 0.18s;
-  }
-
-  .review-fav:hover {
-    background: rgba(255, 107, 157, 0.16);
-    border-color: rgba(255, 107, 157, 0.55);
-  }
-
-  .review-fav:focus-visible {
-    outline: 2px solid var(--pink);
-    outline-offset: 2px;
-  }
-
-  .review-fav b { color: var(--text); font-size: 13.5px; }
-  .review-fav i { font-style: normal; color: #ffa8c6; font-size: 12px; margin-left: auto; }
-
-  /* 继续观看：在看/已开看番剧的下一集入口 */
-  .continue {
-    margin-bottom: 14px;
-    padding: 12px 14px;
-    border: 1px solid rgba(255, 107, 157, 0.28);
-    border-radius: 12px;
-    background: linear-gradient(160deg, rgba(255, 107, 157, 0.08), rgba(139, 123, 255, 0.06));
-  }
-
-  .continue[hidden] { display: none; }
-
-  .continue-head {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 10px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-
-  .continue-head b { color: var(--text); font-size: 13px; }
-
-  .continue-head select { margin-left: auto; flex: 0 0 auto; }
-
-  .continue-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .continue-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 11px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: rgba(13, 15, 20, 0.45);
-  }
-
-  /* 小封面：帮助快速辨认条目，无图时显示占位 */
-  .continue-item .ci-cover {
-    flex: 0 0 auto;
-    width: 34px;
-    height: 46px;
-    border-radius: 6px;
-    overflow: hidden;
-    background: var(--panel-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--muted-2);
-    font-size: 10px;
-  }
-
-  .continue-item .ci-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .continue-item .ci-cover.noimg::after { content: "无图"; }
-
-  .continue-item .ci-main {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-    flex: 1;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .continue-item .ci-main b {
-    font-size: 13px;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .continue-item .ci-main span { font-size: 11.5px; color: var(--muted-2); }
-
-  /* 继续观看：按每话 24 分钟估算剩余时长 */
-  .continue-item .ci-main em {
-    display: block;
-    margin-top: 2px;
-    font-style: normal;
-    font-size: 11px;
-    color: #8f98ad;
-  }
-
-  .continue-item .btn { flex: 0 0 auto; }
-
-  /* 最近浏览：我的番剧页顶部的快捷回访 */
-  .recent {
-    margin-bottom: 14px;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--panel);
-  }
-
-  .recent[hidden] { display: none; }
-
-  .recent .continue-head { align-items: center; }
-
-  .recent-clear {
-    margin-left: auto;
-    flex: 0 0 auto;
-    height: 26px;
-    padding: 0 10px;
-    font-size: 12px;
-  }
-
-  .recent-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .rchip {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    border: 1px solid var(--line);
-    background: var(--panel-2);
-    color: #d6dbe8;
-    font-size: 12px;
-    padding: 5px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: 0.15s;
-  }
-
-  .rchip:hover {
-    color: #fff;
-    border-color: rgba(255, 107, 157, 0.5);
-    background: rgba(255, 107, 157, 0.14);
-  }
-
-  /* 最近浏览单条移除：小尺寸 × 按钮，避免误触整行回访 */
-  .rwrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-
-  .rclose {
-    width: 18px;
-    height: 18px;
-    flex: 0 0 auto;
-    padding: 0;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-    background: transparent;
-    color: var(--muted-2);
-    font-size: 12px;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .rclose:hover {
-    color: #fff;
-    border-color: rgba(255, 107, 157, 0.5);
-  }
-
   .badge.status {
     left: 8px;
     bottom: 8px;
@@ -852,144 +546,6 @@
   .cardmenu-detail {
     width: 100%;
     margin-top: 6px;
-  }
-
-  /* 详情内的观看进度与个人评分 */
-  .track {
-    margin: 0 0 14px;
-    padding: 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--panel-2);
-  }
-
-  .track[hidden] { display: none; }
-
-  .track-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-
-  .track-row + .track-row { margin-top: 10px; }
-
-  .stepper {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-left: auto;
-  }
-
-  /* 直接输入集数跳转，适合从中间开始补番 */
-  .stepper input {
-    width: 52px;
-    height: 28px;
-    padding: 0 4px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--text);
-    font-size: 12px;
-    font-family: inherit;
-    text-align: center;
-    outline: none;
-  }
-
-  .stepper input:focus { border-color: rgba(255, 107, 157, 0.5); }
-
-  .stepper input::-webkit-outer-spin-button,
-  .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-
-  /* 详情内剩余话数提示：回答「还要看多久」 */
-  .track-remain {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--muted-2);
-  }
-
-  .track-remain[hidden] { display: none; }
-
-  .stepper button {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--text);
-    font-size: 15px;
-    line-height: 1;
-    cursor: pointer;
-    transition: 0.15s;
-  }
-
-  .stepper button:hover:not(:disabled) { border-color: rgba(255, 107, 157, 0.55); }
-
-  .stepper button:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  .stepper b { min-width: 20px; text-align: center; color: var(--text); font-size: 13px; }
-  .stepper span { font-size: 12px; color: var(--muted-2); }
-
-  /* 详情内一键看完：仅在有总话数且未看完时出现 */
-  .track-done {
-    flex: 0 0 auto;
-    height: 28px;
-    padding: 0 10px;
-    font-size: 12px;
-  }
-
-  .track-done[hidden] { display: none; }
-
-  /* 单条备注：随收藏一起保存 */
-  .note-row input {
-    flex: 1;
-    min-width: 0;
-    height: 30px;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--text);
-    font-size: 12.5px;
-    font-family: inherit;
-    outline: none;
-  }
-
-  .note-row input::placeholder { color: var(--muted-2); }
-  .note-row input:focus { border-color: rgba(255, 107, 157, 0.5); }
-  .note-row .noteclear { height: 30px; padding: 0 10px; font-size: 12px; flex-shrink: 0; }
-
-  .ratechips {
-    display: flex;
-    gap: 4px;
-    margin-left: auto;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .ratechips button {
-    min-width: 25px;
-    height: 25px;
-    padding: 0 4px;
-    border-radius: 7px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: #b9c0d0;
-    font-size: 11.5px;
-    cursor: pointer;
-    transition: 0.15s;
-  }
-
-  .ratechips button:hover { border-color: var(--line-strong); }
-
-  .ratechips button.active {
-    background: rgba(255, 212, 121, 0.16);
-    border-color: rgba(255, 212, 121, 0.55);
-    color: var(--gold);
-    font-weight: 700;
   }
 
   .modal-actions {
@@ -1452,26 +1008,6 @@
     color: #cfd6e6;
   }
 
-  .tick {
-    position: absolute;
-    right: 8px;
-    bottom: 8px;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: var(--grad);
-    display: grid;
-    place-items: center;
-    font-size: 14px;
-    color: #fff;
-    box-shadow: 0 4px 12px rgba(255, 107, 157, 0.45);
-    opacity: 0;
-    transform: scale(0.5);
-    transition: 0.18s;
-  }
-
-  .card.picked .tick { opacity: 1; transform: scale(1); }
-
   .body {
     padding: 9px 10px 12px;
   }
@@ -1514,8 +1050,6 @@
   }
 
   html[data-theme="light"] header { background: rgba(245, 246, 251, 0.86); }
-  html[data-theme="light"] .continue-item { background: rgba(255, 255, 255, 0.72); }
-  html[data-theme="light"] .rcol.zero .rfill { background: #d9dde7; }
   html[data-theme="light"] .sub { color: #5a6376; }
   html[data-theme="light"] :focus-visible { outline-color: #c2255c; }
   html[data-theme="light"] .resultbar b,
@@ -2775,7 +2309,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.3</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2962,6 +2496,8 @@
       if (!parsed || typeof parsed !== 'object') return {};
       var out = {};
       Object.keys(parsed).forEach(function (id) {
+        // 只接受数字 ID，避免异常键（如 __proto__）污染对象原型
+        if (!/^\d+$/.test(id)) return;
         var entry = normalizeEntry(parsed[id]);
         if (entry) out[id] = entry;
       });
@@ -2980,6 +2516,7 @@
       var out = {};
       var cutoff = Date.now() - DEL_MAX_AGE;
       Object.keys(parsed).forEach(function (id) {
+        if (!/^\d+$/.test(id)) return;
         var ts = Number(parsed[id]) || 0;
         if (ts >= cutoff) out[id] = ts;
       });
@@ -3155,8 +2692,8 @@
     if (map.y === 'all') state.year = 'all';
     else if (y >= start && y <= end) state.year = String(y);
     if (['all', '1', '4', '7', '10'].indexOf(map.s) >= 0) state.season = map.s;
-    if (map.f === 'all' || platforms[map.f]) state.platform = map.f;
-    if (map.r === 'all' || regions[map.r]) state.region = map.r;
+    if (map.f === 'all' || Object.prototype.hasOwnProperty.call(platforms, map.f)) state.platform = map.f;
+    if (map.r === 'all' || Object.prototype.hasOwnProperty.call(regions, map.r)) state.region = map.r;
     if (['score', 'heat', 'date', 'name'].indexOf(map.o) >= 0) state.sort = map.o;
     if (['all'].concat(STATUS_ORDER).indexOf(map.st) >= 0) state.status = map.st;
     if (map.om === '1' || map.om === '0' || typeof map.om === 'boolean') {
@@ -3168,25 +2705,24 @@
     if (map.hm === '1' || map.hm === '0' || typeof map.hm === 'boolean') {
       state.hideMine = map.hm === '1' || map.hm === true;
     }
-    if (map.v === 'grid' || map.v === 'list' || map.v === 'board') state.view = map.v;
+    if (map.v === 'grid' || map.v === 'list' || map.v === 'board' || map.v === 'calendar') state.view = map.v;
     if (['recent', 'name', 'date'].indexOf(map.ms) >= 0) state.mineSort = map.ms;
-    if (map.gb === 'air' || map.gb === 'added') {
+    if (map.gb === 'air' || map.gb === 'added' || map.gb === 'status') {
       state.group = true;
       state.groupBy = map.gb;
     }
     if (map.t === 'light' || map.t === 'dark') state.theme = map.t;
     if (typeof map.q === 'string') state.q = map.q;
+    // 两个相反条件同时存在时会得到空列表，恢复状态时以前者为准
+    if (state.onlyMine && state.hideMine) state.hideMine = false;
     return true;
   }
 
-  function applyHash() {
-    return applyStateMap(parseHash());
-  }
-
   // 深链：hash 中的 d 参数指向要直接打开的番剧详情
-  function hashDetail() {
+  function hashDetailId() {
     var map = parseHash();
-    return map && map.d && byId.has(String(map.d)) ? String(map.d) : null;
+    var id = map && map.d != null ? String(map.d) : '';
+    return /^\d+$/.test(id) ? id : null;
   }
 
   // 记住上次的浏览偏好，直接打开页面（无 hash）时沿用
@@ -3304,7 +2840,9 @@
     ];
     if (state.q.trim()) parts.push('q=' + encodeURIComponent(state.q.trim()));
     if (state.group) parts.push('gb=' + encodeURIComponent(state.groupBy));
-    if (modalId) parts.push('d=' + encodeURIComponent(modalId));
+    // 深链指向的番剧可能还没进首屏数据，先保留参数，等全库补齐后再打开
+    var deepId = modalId || pendingDetail;
+    if (deepId) parts.push('d=' + encodeURIComponent(deepId));
     var next = '#' + parts.join('&');
     if (location.hash !== next) {
       try {
@@ -3511,10 +3049,11 @@
     toast('已回到本季');
   }
 
-  // 我的番剧按状态分组统计
+  // 我的番剧按状态分组统计（只统计当前数据里能展示的条目）
   function renderStatusRow() {
     var counts = { all: 0, want: 0, doing: 0, done: 0, drop: 0 };
     Object.keys(myMap).forEach(function (id) {
+      if (!byId.has(id)) return;
       var e = myMap[id];
       counts.all += 1;
       if (e && counts[e.s] != null) counts[e.s] += 1;
@@ -3595,6 +3134,15 @@
     return best;
   }
 
+  // 单条记录是否命中关键词：中文名 / 原名 / 拼音首字母
+  function matchesQuery(x, token) {
+    var cn = String(x.cn || '').toLowerCase();
+    var n = String(x.n || '').toLowerCase();
+    var py = String(x.py || '');
+    return cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 ||
+      (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
+  }
+
   function filteredList() {
     var list = baseList();
     var q = state.q.trim().toLowerCase();
@@ -3607,24 +3155,12 @@
     if (tokens.length || excludes.length) {
       if (tokens.length) {
         list = list.filter(function (x) {
-          var cn = String(x.cn || '').toLowerCase();
-          var n = String(x.n || '').toLowerCase();
-          var py = String(x.py || '');
-          return tokens.every(function (t) {
-            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0 ||
-              (/^[a-z0-9]+$/.test(t) && py.indexOf(t) >= 0);
-          });
+          return tokens.every(function (t) { return matchesQuery(x, t); });
         });
       }
       if (excludes.length) {
         list = list.filter(function (x) {
-          var cn = String(x.cn || '').toLowerCase();
-          var n = String(x.n || '').toLowerCase();
-          var py = String(x.py || '');
-          return !excludes.some(function (t) {
-            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0 ||
-              (/^[a-z0-9]+$/.test(t) && py.indexOf(t) >= 0);
-          });
+          return !excludes.some(function (t) { return matchesQuery(x, t); });
         });
       }
     } else if (state.tab === 'all') {
@@ -3965,7 +3501,6 @@
       });
     }
     saveMine();
-    if (kind === 'remove') markAllDeleted(ids);
     bulkSel = Object.create(null);
     state.bulk = false;
     render();
@@ -3983,10 +3518,6 @@
         toast('已撤销批量操作');
       }
     });
-  }
-
-  function markAllDeleted(ids) {
-    ids.forEach(markDeleted);
   }
 
   // ---- 云同步状态常驻显示 ----
@@ -4009,7 +3540,9 @@
     if (!canStore) return [];
     try {
       var arr = JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]');
-      return Array.isArray(arr) ? arr : [];
+      return Array.isArray(arr)
+        ? arr.filter(function (v) { return v && typeof v === 'object'; })
+        : [];
     } catch (e) { return []; }
   }
   function saveViews(arr) {
@@ -4027,27 +3560,18 @@
     };
   }
   function applyView(v) {
-    state.tab = v.tab || 'all';
-    state.q = v.q || '';
-    state.year = v.year || String(META.endYear);
-    state.season = v.season || 'all';
-    state.platform = v.platform || 'all';
-    state.region = v.region || 'all';
-    state.sort = v.sort || 'score';
-    state.status = v.status || 'all';
-    state.onlyMine = !!v.onlyMine;
-    state.highScore = !!v.highScore;
-    state.hideMine = !!v.hideMine;
-    state.view = v.view || 'grid';
+    // 复用 hash / 偏好的校验逻辑，避免损坏的视图写入非法 year、platform 等值
+    applyStateMap({
+      tab: v.tab, y: v.year, s: v.season, f: v.platform, r: v.region,
+      o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
+      hm: !!v.hideMine, v: v.view, ms: v.mineSort,
+      gb: v.group ? v.groupBy : '', q: v.q || ''
+    });
     state.group = !!v.group;
-    state.groupBy = v.groupBy || 'air';
-    state.mineSort = v.mineSort || 'recent';
+    state.groupBy = ['air', 'added', 'status'].indexOf(v.groupBy) >= 0 ? v.groupBy : 'air';
     state.bulk = false;
     bulkSel = Object.create(null);
-    searchEl.value = state.q;
-    document.querySelectorAll('.tab').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.tab === state.tab);
-    });
+    // syncControls 会把 tab / 搜索框等控件一并同步到 state
     syncControls();
     render();
   }
@@ -4065,22 +3589,27 @@
   }
 
   function render() {
+    // 状态筛选只在「我的番剧」或搜索时生效，其他场景静默清掉，避免出现无效条件
+    if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
     var list = filteredList();
-    $('mineCount').textContent = Object.keys(myMap).length;
+    // 云端可能带回当前数据里还没有的旧条目，计数与列表保持一致，只算能展示的
+    var mineTotal = 0;
+    Object.keys(myMap).forEach(function (id) { if (byId.has(id)) mineTotal += 1; });
+    $('mineCount').textContent = mineTotal;
     $('minebar').hidden = state.tab !== 'mine';
     $('filters').style.display = state.tab === 'mine' ? 'none' : 'flex';
     $('filterToggle').style.display = state.tab === 'mine' ? 'none' : '';
-    var activeFilters = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
-      (state.sort !== 'score' ? 1 : 0) +
-      (state.onlyMine ? 1 : 0) + (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0);
+    // 筛选按钮与「清除筛选」共用一套计数：前者不含状态与搜索，另单独计入排序
+    var filterCount = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
+      (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
+      (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) + (state.q.trim() ? 1 : 0);
+    var activeFilters = filterCount - (state.status !== 'all' ? 1 : 0) -
+      (state.q.trim() ? 1 : 0) + (state.sort !== 'score' ? 1 : 0);
     $('filterToggle').textContent = activeFilters ? '筛选 · ' + activeFilters : '筛选';
     renderChips();
     renderBulkBar();
     renderSyncState();
     // 常驻「清除筛选」：有筛选条件时才出现，避免空结果时才找得到重置入口
-    var filterCount = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
-      (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
-      (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) + (state.q.trim() ? 1 : 0);
     var clearFiltersBtn = $('clearFiltersBtn');
     clearFiltersBtn.hidden = !filterCount;
     clearFiltersBtn.textContent = filterCount > 1 ? '清除筛选 · ' + filterCount : '清除筛选';
@@ -4119,8 +3648,8 @@
       (state.tab === 'mine' ? ' mine-mode' : '') +
       (state.tab === 'mine' && state.group && !board ? ' timeline' : '');
     var grouped = state.tab === 'mine' && state.group && !board;
-    var shown = board || grouped || calendar ? list : list.slice(0, PAGE_SIZE);
-    if (calendar && shown.length > PAGE_SIZE) shown = shown.slice(0, PAGE_SIZE);
+    // 看板与分组一次展示全部；网格、列表、日历按批渲染
+    var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
     gridEl.innerHTML = board
       ? boardHtml(list)
       : grouped
@@ -4178,6 +3707,8 @@
   // ---- 详情弹窗：大图、元信息、收藏状态、Bangumi 跳转 ----
   var modalEl = $('modal');
   var modalId = null;
+  // 深链目标尚未进入当前数据（首屏仅最近一年）时暂存，全库补齐后自动打开
+  var pendingDetail = null;
   var lastModalFocus = null;
 
   // 相似推荐：同类型同地区优先，再按评分接近程度取前 4 部
@@ -4290,6 +3821,7 @@
     var switched = modalId !== id;
     if (modalEl.hidden) lastModalFocus = document.activeElement;
     modalId = id;
+    pendingDetail = null;
     renderDetail(id);
     modalEl.hidden = false;
     $('detailToggle').focus();
@@ -4397,11 +3929,7 @@
   // 事件绑定
   document.querySelectorAll('.tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      closeDetail();
-      document.querySelectorAll('.tab').forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      state.tab = btn.dataset.tab;
-      render();
+      setTab(btn.dataset.tab);
     });
   });
 
@@ -4752,6 +4280,7 @@
   });
 
   paletteInput.addEventListener('keydown', function (e) {
+    if (e.isComposing) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!paletteItems.length) return;
@@ -4802,6 +4331,12 @@
     var next = list.slice(start, start + PAGE_SIZE);
     if (!next.length) { updateLoadMore(list.length, start, false); return; }
     gridEl.insertAdjacentHTML('beforeend', next.map(cardHtml).join(''));
+    // 新插入的卡片沿用 roving tabindex：只有首张进入 Tab 序列
+    var cards = gridEl.querySelectorAll('.card');
+    for (var i = start; i < cards.length; i += 1) {
+      var link = cards[i].querySelector('.card-link');
+      if (link) link.tabIndex = i === 0 ? 0 : -1;
+    }
     updateLoadMore(list.length, start + next.length, true);
   });
 
@@ -4858,15 +4393,11 @@
 
   $('boardBtn').addEventListener('click', function () {
     state.view = state.view === 'board' ? 'grid' : 'board';
-    savePrefs();
-    writeHash();
     render();
   });
 
   $('mineSort').addEventListener('change', function () {
     state.mineSort = this.value;
-    savePrefs();
-    writeHash();
     render();
   });
 
@@ -4887,6 +4418,8 @@
 
   // 提交搜索（回车 / 失焦）时写入历史；Esc 一键清空关键词并恢复列表
   searchEl.addEventListener('keydown', function (e) {
+    // 中文输入法组词中的 Enter / Esc 由输入法处理，不触发搜索或清空
+    if (e.isComposing) return;
     // 历史面板展开时，↑/↓ 在历史词间移动高亮，回车回填并搜索
     var histBox = $('searchHist');
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && histBox && !histBox.hidden) {
@@ -5339,6 +4872,8 @@
   document.querySelector('.help-mask').addEventListener('click', function () { $('help').hidden = true; });
 
   document.addEventListener('keydown', function (e) {
+    // 命令面板在最上层，Esc / 方向键由它自己处理，不要连带关闭背后的弹窗
+    if (!paletteEl.hidden) return;
     if (!$('syncModal').hidden) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -5451,6 +4986,8 @@
 
   function csvCell(v) {
     var s = String(v == null ? '' : v);
+    // 防止表格软件把以 = + - @ 开头的标题当成公式执行
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
@@ -5595,6 +5132,7 @@
   // ---- 云同步：GitHub Gist（Token 仅保存在本机） ----
   var syncCfg = {};
   var syncBusy = false;
+  var syncQueued = false;
   var syncTimer = null;
   var syncRetryTimer = null;
   var syncRetryCount = 0;
@@ -5632,10 +5170,8 @@
 
   function fmtTime(ts) {
     var d = new Date(ts);
-    var hh = String(d.getHours());
-    var mm = String(d.getMinutes());
     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
-      (hh.length < 2 ? '0' + hh : hh) + ':' + (mm.length < 2 ? '0' + mm : mm);
+      String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
 
   function clearSyncRetry() {
@@ -5703,6 +5239,17 @@
     }
   }
 
+  // 统一给外部请求加超时，避免网络卡住时同步一直停留在「同步中」
+  function fetchWithTimeout(url, opts, ms) {
+    var options = opts || {};
+    try {
+      if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+        options.signal = AbortSignal.timeout(ms);
+      }
+    } catch (e) { /* 不支持时退回普通 fetch */ }
+    return fetch(url, options);
+  }
+
   function gistRequest(cfg, method, path, body) {
     var headers = {
       Authorization: 'Bearer ' + cfg.token,
@@ -5713,7 +5260,7 @@
       headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    return fetch('https://api.github.com' + path, opts).then(function (res) {
+    return fetchWithTimeout('https://api.github.com' + path, opts, 20000).then(function (res) {
       if (res.status === 401) throw new Error('Token 无效或已过期');
       if (res.status === 403) throw new Error('权限不足，Token 需包含 gist 权限');
       if (res.status === 404) {
@@ -5732,7 +5279,7 @@
       var file = g.files && g.files[GIST_FILE];
       if (!file) return null;
       if (file.truncated && file.raw_url) {
-        return fetch(file.raw_url, { headers: { Authorization: 'Bearer ' + cfg.token } })
+        return fetchWithTimeout(file.raw_url, { headers: { Authorization: 'Bearer ' + cfg.token } }, 20000)
           .then(function (r) {
             if (!r.ok) throw new Error('读取 Gist 内容失败');
             return r.text();
@@ -5805,7 +5352,8 @@
     items.forEach(function (it) {
       if (!it || it.id == null) return;
       var id = String(it.id);
-      if (!byId.has(id)) return;
+      // 首屏只有最近一年，远端旧番可能还不在 byId 里；必须保留并原样回写，否则会丢数据
+      if (!/^\d+$/.test(id)) return;
       var r = {
         s: STATUS[it.status] ? it.status : 'done',
         t: Number(it.addedAt) || 0,
@@ -5827,9 +5375,10 @@
       var total = Number((byId.get(id) || {}).e) || 0;
       var status = newer.s;
       if (total > 0 && ep >= total) status = 'done';
+      var joined = Math.min(Number(l.t) || Infinity, r.t || Infinity);
       var next = {
         s: status,
-        t: Math.min(Number(l.t) || Infinity, r.t || Infinity) || Date.now(),
+        t: isFinite(joined) ? joined : Date.now(),
         ep: ep,
         u: Math.max(lU, r.u)
       };
@@ -5837,7 +5386,7 @@
       myMap[id] = next;
     });
     Object.keys(remoteDeleted).forEach(function (id) {
-      if (!byId.has(id)) return;
+      if (!/^\d+$/.test(id)) return;
       var ts = Number(remoteDeleted[id]) || 0;
       var maxTs = Math.max(ts, Number(myDeleted[id]) || 0);
       if (!maxTs) return;
@@ -5863,7 +5412,11 @@
     }
     // 手动同步：重置退避计数，立即执行
     if (!silent) clearSyncRetry();
-    if (syncBusy) return Promise.resolve(false);
+    if (syncBusy) {
+      // 同步期间又有新改动：等本轮结束后补一次，避免这次改动漏推
+      syncQueued = true;
+      return Promise.resolve(false);
+    }
     syncBusy = true;
     setSyncStatus('同步中…', '');
     return gistPull(cfg).then(function (remote) {
@@ -5889,6 +5442,10 @@
       return false;
     }).then(function (ok) {
       syncBusy = false;
+      if (syncQueued) {
+        syncQueued = false;
+        return syncNow(true);
+      }
       return ok;
     });
   }
@@ -5940,11 +5497,12 @@
     if (applyingHash) return;
     applyingHash = true;
     try {
-      if (applyHash()) {
-        var deep = hashDetail();
+      if (applyStateMap(parseHash())) {
+        var wanted = hashDetailId();
         syncControls();
+        pendingDetail = wanted && !byId.has(wanted) ? wanted : null;
         render();
-        if (deep) openDetail(deep);
+        if (wanted && byId.has(wanted)) openDetail(wanted);
         else closeDetail();
       }
     } finally {
@@ -6016,6 +5574,13 @@
     updateDataHint();
     $('loadBar').hidden = true;
     window.__FULL_DATA_READY = true;
+    // 首屏没找到的深链目标，在全库补齐后补开详情
+    if (pendingDetail) {
+      var deepId = pendingDetail;
+      pendingDetail = null;
+      if (byId.has(deepId)) openDetail(deepId);
+      else writeHash();
+    }
   }
 
   function tryFullSource() {
@@ -6080,10 +5645,11 @@
   var hasThemePref = !!(hashMap && hashMap.t) || !!(prefs && prefs.t);
   if (!hasThemePref) state.theme = systemTheme();
   // 先读取深链再 render，避免 render 写 hash 时丢掉 d 参数
-  var initialDetail = fromHash ? hashDetail() : null;
+  var initialDetail = fromHash ? hashDetailId() : null;
+  pendingDetail = initialDetail && !byId.has(initialDetail) ? initialDetail : null;
   syncControls();
   render();
-  if (initialDetail) openDetail(initialDetail);
+  if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();
   if (!fullReady) {
     if ('requestIdleCallback' in window) {

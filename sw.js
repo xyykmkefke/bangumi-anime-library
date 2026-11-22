@@ -1,5 +1,5 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-anime-shell-v11';
+var CACHE = 'yuc-anime-shell-v12';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js'];
 
 self.addEventListener('install', function (e) {
@@ -37,7 +37,8 @@ self.addEventListener('fetch', function (e) {
       caches.match(req).then(function (hit) {
         if (hit) return hit;
         return fetch(req).then(function (res) {
-          if (res.ok) {
+          // 封面多为跨域 opaque 响应（status 0），同样可以缓存供离线使用
+          if (res.ok || res.type === 'opaque') {
             var copy = res.clone();
             caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
           }
@@ -55,8 +56,10 @@ self.addEventListener('fetch', function (e) {
     e.respondWith(
       caches.match(req).then(function (hit) {
         var net = fetch(req).then(function (res) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          if (res.ok || res.type === 'opaque') {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          }
           return res;
         }).catch(function () {
           return hit;
