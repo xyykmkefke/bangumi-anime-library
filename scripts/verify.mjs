@@ -602,7 +602,7 @@ async function main() {
     for (let i = 0; i < 80; i += 1) {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
-      if (await cdp.evaluate("document.activeElement.classList.contains('card')")) {
+      if (await cdp.evaluate("document.activeElement.classList.contains('card-link')")) {
         focusedCard = true;
         break;
       }
@@ -1033,13 +1033,13 @@ async function main() {
       document.querySelector('#grid .card[data-id="' + id + '"] [data-act="epplus"]').click();
       await new Promise((r) => setTimeout(r, 200));
       const nowCard = document.querySelector('#grid .card[data-id="' + id + '"]');
-      const text = nowCard.querySelector('.cprog').textContent;
+      const text = nowCard.querySelector('.cprog .epin').value;
       const entry = JSON.parse(localStorage.getItem('yuc_my_anime_v1'))[id];
       const modalClosed = document.getElementById('modal').hidden;
       nowCard.querySelector('[data-act="epminus"]').click();
       await new Promise((r) => setTimeout(r, 200));
       const entry2 = JSON.parse(localStorage.getItem('yuc_my_anime_v1'))[id];
-      return [before, entry.ep, entry.s, /2\\s*\\/\\s*\\d+\\s*话/.test(text),
+      return [before, entry.ep, entry.s, Number(text) === before + 2,
         modalClosed, entry2.ep].join('|');
     })()`);
     const progParts = progInfo.split('|');
@@ -1174,9 +1174,9 @@ async function main() {
     check('提示区域是无障碍 live region', toastRole === 'status|polite', toastRole);
 
     const focusInfo = await cdp.evaluate(`(() => {
-      const card = document.querySelector('#grid .card');
-      card.focus();
-      card.click();
+      const link = document.querySelector('#grid .card-link');
+      link.focus();
+      link.click();
       const nodes = [...document.querySelectorAll('#modal button, #modal a[href]')]
         .filter((el) => !el.disabled && el.offsetParent !== null);
       const first = nodes[0];
@@ -1185,7 +1185,7 @@ async function main() {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
       const wrapped = document.activeElement === first;
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      return [wrapped, document.activeElement === card,
+      return [wrapped, document.activeElement === link,
         document.getElementById('modal').hidden].join('|');
     })()`);
     check('弹窗焦点陷阱与 Esc 焦点还原', focusInfo === 'true|true|true', focusInfo);
@@ -1420,13 +1420,13 @@ async function main() {
 
     // 方向键在卡片间移动焦点
     const navInfo = await cdp.evaluate(`(() => {
-      const cards = [...document.querySelectorAll('#grid .card')];
-      cards[0].focus();
+      const links = [...document.querySelectorAll('#grid .card-link')];
+      links[0].focus();
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-      const down = document.activeElement === cards[1];
+      const down = document.activeElement === links[1];
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
-      const up = document.activeElement === cards[0];
-      return [cards.length > 1, down, up].join('|');
+      const up = document.activeElement === links[0];
+      return [links.length > 1, down, up].join('|');
     })()`);
     check('方向键可在卡片间移动焦点', navInfo === 'true|true|true', navInfo);
 
@@ -1578,6 +1578,210 @@ async function main() {
     }
     check('存储可用时不显示提示', warnHidden === true);
 
+    // ---- v1.6 交互与可用性 ----
+    // 卡片用 article + 链接覆盖层，操作按钮不嵌在链接内
+    const cardSem = await cdp.evaluate(`(() => {
+      const c = document.querySelector('#grid .card');
+      if (!c) return 'no-card';
+      const link = c.querySelector('.card-link');
+      const toggle = c.querySelector('[data-act="toggle"]');
+      return [c.tagName, c.getAttribute('role') || '-', !!link,
+        !!toggle && !link.contains(toggle),
+        document.querySelectorAll('#grid .card-link[tabindex="0"]').length].join('|');
+    })()`);
+    check('卡片语义为 article + 链接，操作按钮独立', cardSem === 'ARTICLE|-|true|true|1', cardSem);
+
+    // 筛选 chips：可看到当前条件并单独移除
+    const chipInfo = await cdp.evaluate(`(async () => {
+      const sel = document.getElementById('platform');
+      const opt = [...sel.options].find((o) => o.value !== 'all');
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 350));
+      const box = document.getElementById('filterChips');
+      const chip = box.querySelector('.chip');
+      const shown = !box.hidden && !!chip;
+      if (chip) chip.querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 350));
+      return [shown, document.getElementById('platform').value, box.hidden].join('|');
+    })()`);
+    check('已启用筛选用 chips 展示并可移除', chipInfo === 'true|all|true', chipInfo);
+
+    // 移出后可撤销
+    const undoInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[0].click();
+      await new Promise((r) => setTimeout(r, 300));
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const card = cards[0];
+      const id = card.dataset.id;
+      card.querySelector('[data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 250));
+      document.querySelector('#grid .card[data-id="' + id + '"] [data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 250));
+      const btn = document.getElementById('toastAct');
+      const hasUndo = !!btn;
+      if (btn) btn.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const restored = !!JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[id];
+      document.querySelector('#grid .card[data-id="' + id + '"] [data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      return [hasUndo, restored].join('|');
+    })()`);
+    check('移出番剧支持撤销', undoInfo === 'true|true', undoInfo);
+
+    // 直接输入集数
+    const epInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 350));
+      const card = document.querySelector('#grid .card');
+      if (!card) return 'no-card';
+      const id = card.dataset.id;
+      const input = card.querySelector('.epin');
+      const before = Number(input.value) || 0;
+      input.value = String(before + 3);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 350));
+      const after = JSON.parse(localStorage.getItem('yuc_my_anime_v1'))[id].ep;
+      return [after === before + 3].join('|');
+    })()`);
+    check('卡片内可直接输入已看集数', epInfo === 'true', epInfo);
+
+    // 批量操作 + 撤销
+    const bulkInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 300));
+      document.getElementById('bulkBtn').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const ids = [...document.querySelectorAll('#grid .card')].slice(0, 2).map((c) => c.dataset.id);
+      ids.forEach((id) => {
+        const c = document.querySelector('#grid .card[data-id="' + id + '"]');
+        if (c) c.click();
+      });
+      await new Promise((r) => setTimeout(r, 250));
+      const count = document.getElementById('bulkCount').textContent;
+      const barShown = !document.getElementById('bulkBar').hidden;
+      document.querySelector('[data-bulk="done"]').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const stored = JSON.parse(localStorage.getItem('yuc_my_anime_v1'));
+      const allDone = ids.every((id) => stored[id] && stored[id].s === 'done');
+      const undo = document.getElementById('toastAct');
+      if (undo) undo.click();
+      await new Promise((r) => setTimeout(r, 350));
+      return [barShown, count.indexOf('2') >= 0, allDone, !!undo].join('|');
+    })()`);
+    check('我的番剧支持批量选择与操作', bulkInfo === 'true|true|true|true', bulkInfo);
+
+    // 按观看状态分组
+    const statusGroupInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 300));
+      const btn = document.getElementById('groupBtn');
+      if (!btn.classList.contains('primary')) btn.click();
+      await new Promise((r) => setTimeout(r, 250));
+      const g = document.getElementById('groupBy');
+      g.value = 'status';
+      g.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 350));
+      const groups = [...document.querySelectorAll('#grid .st-group')];
+      const summary = groups.map((x) => x.querySelector('summary').textContent.trim()).join('|');
+      const ok = groups.length > 0 && groups.every((x) => x.open);
+      if (document.getElementById('groupBtn').classList.contains('primary')) document.getElementById('groupBtn').click();
+      await new Promise((r) => setTimeout(r, 250));
+      return [ok, summary].join('|');
+    })()`);
+    check('我的番剧可按观看状态分组', statusGroupInfo.startsWith('true|') && /(想看|在看|看完|弃番)/.test(statusGroupInfo), statusGroupInfo);
+
+    // 本季日历
+    const calInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[0].click();
+      await new Promise((r) => setTimeout(r, 300));
+      document.getElementById('calBtn').click();
+      await new Promise((r) => setTimeout(r, 350));
+      const cols = document.querySelectorAll('#grid .cal-col').length;
+      const items = document.querySelectorAll('#grid .cal-item').length;
+      const label = document.getElementById('calBtn').textContent;
+      document.getElementById('calBtn').click();
+      await new Promise((r) => setTimeout(r, 250));
+      return [cols, items > 0, label].join('|');
+    })()`);
+    check('可切换到本季日历并显示 7 天', calInfo.startsWith('7|true|'), calInfo);
+
+    // 命令面板：Ctrl+K 打开、可搜索番剧、Esc 关闭
+    const paletteInfo = await cdp.evaluate(`(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const panel = document.getElementById('palette');
+      const open = !panel.hidden;
+      const input = document.getElementById('paletteInput');
+      const focused = document.activeElement === input;
+      const cmds = document.querySelectorAll('#paletteList .palette-item').length;
+      input.value = '主';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const hasAnime = [...document.querySelectorAll('#paletteList .palette-item .pkind')]
+        .some((x) => /-/.test(x.textContent));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      return [open, focused, cmds > 3, hasAnime, panel.hidden].join('|');
+    })()`);
+    check('命令面板可打开、搜索并关闭', paletteInfo === 'true|true|true|true|true', paletteInfo);
+
+    // 保存筛选视图
+    const viewInfo = await cdp.evaluate(`(async () => {
+      localStorage.removeItem('yuc_views_v1');
+      window.prompt = () => '测试视图';
+      document.getElementById('viewsBtn').click();
+      await new Promise((r) => setTimeout(r, 200));
+      document.querySelector('[data-view-save]').click();
+      await new Promise((r) => setTimeout(r, 250));
+      const saved = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]');
+      const input = document.getElementById('search');
+      input.value = '不存在的番xyz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 350));
+      const apply = document.querySelector('[data-view-apply="0"]');
+      if (apply) apply.click();
+      await new Promise((r) => setTimeout(r, 350));
+      const restored = input.value === '';
+      localStorage.removeItem('yuc_views_v1');
+      return [saved.length, saved[0] && saved[0].name, restored].join('|');
+    })()`);
+    check('可保存并套用筛选视图', viewInfo === '1|测试视图|true', viewInfo);
+
+    // 拼音首字母搜索
+    const pyInfo = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[0].click();
+      const prevYear = (document.querySelector('#years .pill.active') || {}).dataset.year || '';
+      const allPill = document.querySelector('#years [data-year="all"]');
+      if (allPill) allPill.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const item = window.ANIME_DATA.find((x) => x.py && x.py.length >= 4);
+      if (!item) return 'no-py';
+      const q = item.py.slice(0, 3);
+      const input = document.getElementById('search');
+      input.value = q;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 500));
+      const found = [...document.querySelectorAll('#grid .card')].some((c) => c.dataset.id === String(item.i));
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      const back = document.querySelector('#years [data-year="' + prevYear + '"]');
+      if (back) back.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return [found, q].join('|');
+    })()`);
+    check('支持拼音首字母搜索', pyInfo.startsWith('true|'), pyInfo);
+
+    // 云同步状态位与服务端菜单
+    const syncBits = await cdp.evaluate(`(() => {
+      const st = document.getElementById('syncState');
+      const menu = document.getElementById('moreMenu');
+      const items = [...menu.querySelectorAll('[data-more]')].map((b) => b.dataset.more);
+      return [!!st, st.hidden, items.includes('export-json'), items.includes('sync')].join('|');
+    })()`);
+    check('头部更多菜单整合导出与同步', syncBits === 'true|true|true|true', syncBits);
+
     // 移动端横向溢出检查
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 390,
@@ -1611,6 +1815,39 @@ async function main() {
       '移动端可展开筛选且不溢出',
       expandedParts[0] === 'flex' && expandedParts[1] === 'true' && Number(expandedParts[2]) <= 1,
       expandedState,
+    );
+
+    // 移动端紧凑头部：搜索默认收起，可点图标展开；主要控件达到 44px
+    const mobileChrome = await cdp.evaluate(`(async () => {
+      const search = document.getElementById('search').closest('.search');
+      const toggle = document.getElementById('searchToggle');
+      const tabH = document.querySelector('.tab').getBoundingClientRect().height;
+      const filterH = document.getElementById('filterToggle').getBoundingClientRect().height;
+      const pillH = document.querySelector('#years .pill').getBoundingClientRect().height;
+      const hidden = getComputedStyle(search).display === 'none' && getComputedStyle(toggle).display !== 'none';
+      toggle.click();
+      await new Promise((r) => setTimeout(r, 200));
+      const opened = getComputedStyle(search).display !== 'none' &&
+        toggle.getAttribute('aria-expanded') === 'true';
+      toggle.click();
+      await new Promise((r) => setTimeout(r, 200));
+      return [hidden, opened, Math.round(tabH), Math.round(filterH), Math.round(pillH)].join('|');
+    })()`);
+    const mParts = mobileChrome.split('|');
+    check(
+      '移动端搜索默认收起且触控目标≥44px',
+      mParts[0] === 'true' && mParts[1] === 'true' &&
+        Number(mParts[2]) >= 44 && Number(mParts[3]) >= 44 && Number(mParts[4]) >= 44,
+      mobileChrome,
+    );
+
+    // 骨架屏：源码内含首屏占位，渲染后被真实卡片替换
+    const skeletonSrc = await readFile(path.join(ROOT, 'index.html'), 'utf8');
+    const skeletonGone = await cdp.evaluate("document.querySelectorAll('#grid .skel-card').length === 0");
+    check(
+      '首屏骨架屏已接入且不残留',
+      skeletonSrc.includes('skel-card') && skeletonSrc.includes('loadbar') && skeletonGone,
+      `gone=${skeletonGone}`,
     );
 
     const overflow = await cdp.evaluate('document.documentElement.scrollWidth - window.innerWidth');

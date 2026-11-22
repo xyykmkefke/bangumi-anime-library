@@ -5,6 +5,7 @@
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { buildLite } from './build-lite.mjs';
+import { initials } from './build-pinyin.mjs';
 
 const BASE = 'https://bgmapi.anibt.net';
 const START_YEAR = 1990;
@@ -94,6 +95,7 @@ function slim(item) {
     h: item.collection?.collect || 0,
     g: toRegion(item.meta_tags, item.tags),
     img: item.images?.common || item.images?.large || '',
+    py: initials(item.name_cn || item.name || ''),
   };
 }
 

@@ -20,7 +20,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.1">
+<meta name="version" content="1.6.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2078,6 +2078,555 @@
   html[data-theme="light"] .sync-status.err { color: #b42318; }
   .sync-tip { margin: 14px 0 0; font-size: 11.5px; line-height: 1.65; color: var(--muted-2); }
 
+  /* ===== v1.6：信息密度、触控、可访问性与新交互 ===== */
+  :root {
+    --st-want: #6aa3ff;
+    --st-doing: #d9a04a;
+    --st-done: #57ad7b;
+    --st-drop: #8b93a5;
+    --fs-body: 14px;
+  }
+
+  body { font-size: var(--fs-body); }
+  .meta, .sub { font-size: 12px; }
+  .resultbar span, .hint { font-size: 12.5px; }
+  .minebar[hidden] { display: none; }
+  .brand-name { white-space: nowrap; }
+  .tab .ts { display: none; }
+
+  /* 语义状态色：只在状态徽章上使用色相，强调色仍留给主操作 */
+  .badge.status { background: rgba(255, 255, 255, 0.9); color: #1b1e26; }
+  html[data-theme="dark"] .badge.status { background: rgba(10, 11, 13, 0.88); color: #e8ebf2; }
+  .badge.status::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: 1px;
+    background: var(--st-drop);
+  }
+  .badge.status.s-want::before { background: var(--st-want); }
+  .badge.status.s-doing::before { background: var(--st-doing); }
+  .badge.status.s-done::before { background: var(--st-done); }
+  .badge.status.s-drop::before { background: var(--st-drop); }
+  .badge.status.s-want { color: #dbe7ff; }
+  .badge.status.s-doing { color: #ffe7c2; }
+  .badge.status.s-done { color: #d6f3e2; }
+  html[data-theme="light"] .badge.status.s-want { color: #1c4f9e; }
+  html[data-theme="light"] .badge.status.s-doing { color: #7a4c06; }
+  html[data-theme="light"] .badge.status.s-done { color: #1c6a42; }
+
+  .iconbtn {
+    display: none;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .iconbtn svg { width: 17px; height: 17px; stroke: var(--text); }
+
+  .search-toggle { display: none; }
+
+  /* 弹出菜单：头部“更多”、我的番剧“更多”、筛选视图共用 */
+  .popmenu {
+    position: absolute;
+    z-index: 80;
+    min-width: 176px;
+    padding: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  }
+  .popmenu[hidden] { display: none; }
+  .popmenu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .popmenu button:hover, .popmenu button:focus-visible { background: var(--panel-2); }
+  .popmenu button.danger { color: #ff9a9a; }
+  .popmenu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+  .popmenu kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    color: var(--muted-2);
+    font-size: 11px;
+  }
+  #moreMenu { top: calc(100% - 4px); right: 0; }
+  #viewsMenu { top: calc(100% + 6px); right: 0; }
+  .mine-menu { top: calc(100% + 6px); right: 0; }
+  .minebar { position: relative; }
+
+  /* 已启用筛选：小胶囊，可单独移除 */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 0 10px;
+  }
+  .chips[hidden] { display: none; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip button {
+    border: 0;
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px;
+    cursor: pointer;
+  }
+  .chip button:hover { color: var(--text); }
+
+  /* 首屏骨架，避免白屏和布局跳动 */
+  .skel-card { pointer-events: none; }
+  .skel-cover {
+    aspect-ratio: 3 / 4;
+    border-radius: 8px;
+    background: linear-gradient(100deg, var(--panel) 30%, var(--panel-2) 50%, var(--panel) 70%);
+    background-size: 220% 100%;
+    animation: skel 1.4s ease-in-out infinite;
+  }
+  .skel-line {
+    height: 11px;
+    margin-top: 8px;
+    border-radius: 4px;
+    background: var(--panel-2);
+    animation: skel 1.4s ease-in-out infinite;
+  }
+  .skel-line.short { width: 58%; }
+  @keyframes skel {
+    0% { background-position: 120% 0; }
+    100% { background-position: -80% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skel-cover, .skel-line { animation: none; }
+  }
+
+  /* 全库加载进度条 */
+  .loadbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 120;
+    height: 2px;
+    overflow: hidden;
+    background: transparent;
+    pointer-events: none;
+  }
+  .loadbar[hidden] { display: none; }
+  .loadbar i {
+    display: block;
+    width: 40%;
+    height: 100%;
+    background: var(--accent);
+    animation: loadslide 1.1s ease-in-out infinite;
+  }
+  @keyframes loadslide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(320%); }
+  }
+
+  /* 卡片：整卡可点 + 独立操作按钮，避免交互元素嵌套 */
+  .card { position: relative; }
+  .card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    border-radius: inherit;
+  }
+  .card-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+  }
+  .card .ctools { position: relative; z-index: 2; }
+  .card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (min-width: 641px) {
+    .grid:not(.mine-mode) .card .ctools [data-act="toggle"] {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s;
+    }
+    .grid:not(.mine-mode) .card:hover .ctools [data-act="toggle"],
+    .grid:not(.mine-mode) .card:focus-within .ctools [data-act="toggle"] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+  @media (max-width: 640px) {
+    .grid:not(.mine-mode) .card .ctools { opacity: 1; pointer-events: auto; }
+    .grid:not(.mine-mode) .card .ctools [data-act="toggle"] { display: none; }
+  }
+  .card .ctool.icon {
+    width: 30px;
+    min-width: 30px;
+    padding: 0;
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  /* 批量操作栏 */
+  .bulkbar {
+    position: fixed;
+    left: 50%;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: calc(100vw - 24px);
+    padding: 8px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  }
+  .bulkbar[hidden] { display: none; }
+  .bulkbar .bulk-count { font-size: 12.5px; color: var(--muted); padding: 0 4px; }
+  .bulkbar .btn { height: 34px; }
+
+  /* 命令面板 */
+  .palette {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12vh 16px 16px;
+  }
+  .palette[hidden] { display: none; }
+  .palette-mask { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); }
+  .palette-panel {
+    position: relative;
+    width: min(560px, 100%);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .palette-panel input {
+    width: 100%;
+    height: 48px;
+    padding: 0 14px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+  .palette-list { max-height: 52vh; overflow-y: auto; padding: 6px; }
+  .palette-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .palette-item .pkind { font-size: 11px; color: var(--muted-2); }
+  .palette-item .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .palette-item.active, .palette-item:hover { background: var(--accent-soft); }
+  .palette-empty { padding: 18px 12px; color: var(--muted-2); font-size: 13px; }
+
+  /* 本季日历 */
+  .cal {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+    align-items: start;
+  }
+  .cal-col { min-width: 0; }
+  .cal-head {
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .cal-item {
+    display: flex;
+    gap: 7px;
+    padding: 6px;
+    margin-bottom: 6px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel);
+    text-decoration: none;
+    color: inherit;
+  }
+  .cal-item img { width: 34px; height: 45px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; background: var(--panel-2); }
+  .cal-item .ci-main { min-width: 0; }
+  .cal-item .ci-date { font-size: 10.5px; color: var(--muted-2); }
+  .cal-item .ci-title {
+    font-size: 11.5px;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .cal-empty { color: var(--muted-2); font-size: 11.5px; padding: 6px 2px; }
+  @media (max-width: 760px) {
+    .cal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  /* 分组状态可折叠 */
+  .st-group { margin-bottom: 14px; }
+  .st-group > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+  }
+  .st-group > summary::-webkit-details-marker { display: none; }
+  .st-group > summary::before {
+    content: '▸';
+    color: var(--muted-2);
+    transition: transform 0.15s;
+  }
+  .st-group[open] > summary::before { transform: rotate(90deg); }
+  .st-group > summary .n { color: var(--muted-2); font-weight: 400; font-size: 12px; }
+  .st-group .grid { margin-top: 4px; }
+
+  /* 进度：集数可直接输入 */
+  .cprog .epin {
+    width: 42px;
+    height: 26px;
+    padding: 0 2px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 12px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .cprog .epin:focus { outline: none; border-color: var(--accent); }
+  .cprog .eptotal { color: var(--muted-2); font-size: 11.5px; white-space: nowrap; }
+
+  /* 云同步状态 */
+  .syncstate {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--muted-2);
+  }
+  .syncstate[hidden] { display: none; }
+  .syncstate::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--st-drop);
+  }
+  .syncstate.ok::before { background: var(--st-done); }
+  .syncstate.busy::before { background: var(--st-doing); }
+  .syncstate.err::before { background: #e06c6c; }
+
+  /* 选中态 */
+  .card.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .selbox {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    width: 22px;
+    height: 22px;
+    border: 1.5px solid rgba(255, 255, 255, 0.8);
+    border-radius: 6px;
+    background: rgba(10, 11, 13, 0.55);
+    color: transparent;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .card.selected .selbox { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* 触控尺寸：只在触屏/窄屏放大主要控件 */
+  @media (max-width: 640px), (pointer: coarse) {
+    .btn, .tab, .filter-toggle, .iconbtn { min-height: 44px; }
+    .pill { min-height: 44px; padding-left: 12px; padding-right: 12px; }
+    .card .ctool { min-height: 44px; }
+    .card .ctool.icon { min-width: 40px; width: 40px; }
+    .popmenu button { min-height: 44px; }
+    .chip { height: 32px; }
+    .chip button { min-width: 28px; min-height: 28px; }
+    .cprog .epin { height: 34px; }
+    footer { font-size: 12px; }
+  }
+
+  /* 移动端紧凑头部：搜索默认收起，筛选与更多为图标 */
+  @media (max-width: 640px) {
+    .topbar {
+      position: relative;
+      flex-wrap: nowrap;
+      gap: 6px;
+      padding: 9px 0;
+    }
+    .brand-name { display: none; }
+    h1 { font-size: 16px; letter-spacing: 0.2px; }
+    h1 .brand-mark { width: 24px; height: 24px; font-size: 13px; }
+    .tabs { margin-left: 2px; }
+    .tab { padding: 6px 8px; font-size: 12.5px; }
+    .tab .tl { display: none; }
+    .tab .ts { display: inline; }
+    .theme-toggle { display: none; }
+    .search-toggle { display: inline-flex; }
+    .iconbtn { display: inline-flex; width: 36px; min-width: 36px; height: 36px; }
+    .search {
+      display: none;
+      order: 0;
+      min-width: 0;
+      flex-basis: auto;
+    }
+    .topbar.search-open .search {
+      display: block;
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      padding: 8px 0 10px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--line);
+      z-index: 50;
+    }
+    .filter-toggle {
+      margin-left: auto;
+      padding: 0 9px;
+      font-size: 12.5px;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .filters { padding-bottom: 0; }
+    .filters .years { display: none; }
+    .filters.expanded { padding-bottom: 10px; }
+    .filters.expanded .years { display: flex; }
+    .chips { padding-bottom: 8px; }
+    .minebar { gap: 6px; padding: 9px 10px; }
+    .minebar .btn, .minebar select { height: 44px; min-height: 44px; font-size: 12.5px; }
+    .resultbar { margin-bottom: 10px; }
+    .cal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cal-col { border-top: 1px solid var(--line); padding-top: 8px; }
+    .cal-head { border: 0; margin-bottom: 4px; }
+    .cal-item { margin-bottom: 4px; }
+    .bulkbar { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 7px; }
+  }
+
+  /* 筛选行更紧凑，避免桌面端把「视图」挤到第三行 */
+  @media (min-width: 641px) {
+    .row2 { gap: 6px; }
+    .row2 .btn { padding-left: 8px; padding-right: 8px; }
+    .row2 select { padding: 0 6px; }
+  }
+
+  .btn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  /* 封面加载中或缺失时用按条目生成的柔和色占位，避免整块死黑 */
+  .cover { background: hsl(var(--phh, 220) 18% 18%); }
+  html[data-theme="light"] .cover { background: hsl(var(--phh, 220) 40% 92%); }
+  .cover img { background: transparent; }
+
+  /* 卡片工具条移到链接外后的间距 */
+  .card > .ctools { padding: 0 12px 12px; margin-top: 0; justify-content: flex-end; }
+  .card-link .body { padding-bottom: 7px; }
+  .cal-item .ci-cover {
+    position: relative;
+    width: 34px;
+    height: 45px;
+    flex: 0 0 auto;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--panel-2);
+  }
+  .cal-item .ci-cover img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .cal-item .ci-ph {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted-2);
+    font-size: 14px;
+  }
+  .cal-item .ci-state { display: block; margin-top: 2px; font-size: 10px; color: var(--accent); }
+  .popmenu-empty { padding: 10px; color: var(--muted-2); font-size: 12px; }
+  .vdel {
+    padding: 0 4px;
+    color: var(--muted-2);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .vdel:hover { color: #ff9a9a; }
+  #toast button {
+    margin-left: 10px;
+    padding: 2px 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #toast button:hover { border-color: var(--accent); color: var(--accent); }
+  .cal { grid-column: 1 / -1; }
+  .st-group { grid-column: 1 / -1; }
 </style>
 </head>
 <body>
@@ -2085,22 +2634,38 @@
 <header>
   <div class="wrap">
     <div class="topbar">
-      <h1><span class="brand-mark">番</span>番剧库</h1>
+      <h1><span class="brand-mark">番</span><span class="brand-name">番剧库</span></h1>
       <div class="search">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
           <circle cx="11" cy="11" r="7"></circle>
           <path d="m20 20-3.5-3.5"></path>
         </svg>
-        <input id="search" type="search" placeholder="搜索番名（空格分隔多个关键词，-词 排除）" autocomplete="off" aria-label="搜索番名">
+        <input id="search" type="search" placeholder="搜索番名或拼音首字母（空格分隔，-词 排除）" autocomplete="off" aria-label="搜索番名">
         <div class="searchhist" id="searchHist" hidden></div>
       </div>
       <nav class="tabs">
-        <button class="tab active" data-tab="all">全部番剧</button>
-        <button class="tab" data-tab="mine">我的番剧<span class="count" id="mineCount">0</span></button>
+        <button class="tab active" data-tab="all"><span class="tl">全部番剧</span><span class="ts">全部</span></button>
+        <button class="tab" data-tab="mine"><span class="tl">我的番剧</span><span class="ts">我的</span><span class="count" id="mineCount">0</span></button>
       </nav>
       <button class="btn theme-toggle" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题">☾</button>
       <button class="btn theme-toggle" id="helpBtn" type="button" aria-label="键盘快捷键帮助" title="键盘快捷键">?</button>
       <button class="btn filter-toggle" id="filterToggle" type="button" aria-expanded="false">筛选</button>
+      <button class="btn iconbtn search-toggle" id="searchToggle" type="button" aria-label="打开搜索" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+      </button>
+      <button class="btn iconbtn" id="moreBtn" type="button" aria-label="更多操作" aria-expanded="false">⋯</button>
+      <div class="popmenu" id="moreMenu" hidden>
+        <button type="button" data-more="theme">切换主题</button>
+        <button type="button" data-more="help">键盘快捷键</button>
+        <button type="button" data-more="palette">命令面板<kbd>Ctrl K</kbd></button>
+        <button type="button" data-more="calendar">本季日历</button>
+        <hr>
+        <button type="button" data-more="export-json">导出 JSON</button>
+        <button type="button" data-more="export-csv">导出 CSV</button>
+        <button type="button" data-more="export-md">导出 Markdown</button>
+        <button type="button" data-more="import">导入备份</button>
+        <button type="button" data-more="sync">云同步</button>
+      </div>
     </div>
 
     <div class="filters" id="filters">
@@ -2130,13 +2695,18 @@
           <button data-view="grid" class="active" type="button">网格</button>
           <button data-view="list" type="button">列表</button>
         </div>
+        <button class="btn" id="calBtn" type="button" title="按首播日期的星期查看本季番剧">首播日历</button>
         <button class="btn" id="copyViewBtn" type="button" title="复制包含当前筛选与视图的链接">复制视图链接</button>
+        <button class="btn" id="viewsBtn" type="button" aria-expanded="false" title="保存或套用筛选组合">视图</button>
+        <div class="popmenu" id="viewsMenu" hidden></div>
         <span class="spacer"></span>
         <span class="hint" id="dataHint"></span>
       </div>
     </div>
+    <div class="chips" id="filterChips" hidden></div>
   </div>
 </header>
+<div class="loadbar" id="loadBar" hidden><i></i></div>
 
 <main class="wrap">
   <div class="notice" id="storageWarn" hidden>
@@ -2144,11 +2714,13 @@
   </div>
   <div class="minebar" id="minebar" hidden>
     <div class="stat">收藏 <b id="statCount">0</b> 部</div>
+    <span class="syncstate" id="syncState" hidden></span>
     <span class="spacer"></span>
     <button class="btn" id="groupBtn">按季度分组</button>
     <select id="groupBy" aria-label="分组方式" hidden>
       <option value="air">按首播季度</option>
       <option value="added">按加入年份</option>
+      <option value="status">按观看状态</option>
     </select>
     <button class="btn" id="boardBtn">看板视图</button>
     <select id="mineSort" aria-label="我的番剧排序">
@@ -2156,26 +2728,54 @@
       <option value="name">名称</option>
       <option value="date">首播时间</option>
     </select>
-    <button class="btn" id="exportBtn">导出 JSON</button>
-    <button class="btn" id="exportCsv">导出 CSV</button>
-    <button class="btn" id="exportMd">导出 Markdown</button>
-    <button class="btn" id="importBtn">导入备份</button>
-    <button class="btn" id="syncBtn">云同步</button>
+    <button class="btn" id="bulkBtn" type="button">批量</button>
+    <button class="btn" id="mineMoreBtn" type="button" aria-expanded="false">更多</button>
+    <div class="popmenu mine-menu" id="mineMore" hidden>
+      <button type="button" data-mine="export-json">导出 JSON</button>
+      <button type="button" data-mine="export-csv">导出 CSV</button>
+      <button type="button" data-mine="export-md">导出 Markdown</button>
+      <button type="button" data-mine="import">导入备份</button>
+      <button type="button" data-mine="sync">云同步</button>
+    </div>
+    <button class="btn" id="exportBtn" hidden>导出 JSON</button>
+    <button class="btn" id="exportCsv" hidden>导出 CSV</button>
+    <button class="btn" id="exportMd" hidden>导出 Markdown</button>
+    <button class="btn" id="importBtn" hidden>导入备份</button>
+    <button class="btn" id="syncBtn" hidden>云同步</button>
     <button class="btn danger" id="clearBtn">清空</button>
     <span class="backup-hint" id="backupHint" hidden></span>
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
   </div>
 
+  <div class="bulkbar" id="bulkBar" hidden>
+    <span class="bulk-count" id="bulkCount">已选 0 部</span>
+    <button class="btn" data-bulk="want" type="button">想看</button>
+    <button class="btn" data-bulk="doing" type="button">在看</button>
+    <button class="btn" data-bulk="done" type="button">看完</button>
+    <button class="btn" data-bulk="drop" type="button">弃番</button>
+    <button class="btn danger" data-bulk="remove" type="button">移出</button>
+    <button class="btn" data-bulk="cancel" type="button">取消</button>
+  </div>
+
   <div class="statusrow" id="statusRow" hidden></div>
 
   <div class="resultbar" id="resultbar"></div>
-  <div class="grid" id="grid"></div>
+  <div class="grid" id="grid" aria-busy="true">
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+    <div class="skel-card" aria-hidden="true"><div class="skel-cover"></div><div class="skel-line"></div><div class="skel-line short"></div></div>
+  </div>
   <div class="loadmore" id="loadMore" hidden><button class="btn" id="loadMoreBtn" type="button">显示更多</button></div>
   <div class="empty" id="empty" hidden></div>
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.5.1</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.6.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2221,7 +2821,7 @@
       <li><kbd>T</kbd><span>切换明暗主题</span></li>
       <li><kbd>Esc</kbd><span>关闭详情或本帮助</span></li>
       <li><kbd>?</kbd><span>打开 / 关闭本帮助</span></li>
-      <li><kbd>长按</kbd><span>快速修改追番状态</span></li>
+      <li><kbd>长按</kbd><span>快捷菜单；Ctrl K 打开命令面板</span></li>
     </ul>
     <button class="btn primary" id="helpClose" type="button">知道了</button>
   </div>
@@ -2242,6 +2842,14 @@
       <span class="sync-status" id="syncStatus"></span>
     </div>
     <p class="sync-tip">Token 只保存在本机浏览器，同步时数据直连 api.github.com，不经过其他服务器。换设备时用同一个 Token 和 Gist ID 即可接上。</p>
+  </div>
+</div>
+
+<div class="palette" id="palette" hidden>
+  <div class="palette-mask" id="paletteMask"></div>
+  <div class="palette-panel" role="dialog" aria-modal="true" aria-label="命令面板">
+    <input id="paletteInput" type="text" placeholder="搜索番剧，或输入命令（如 主题 / 同步 / 导出）" autocomplete="off" aria-label="命令或番剧">
+    <div class="palette-list" id="paletteList"></div>
   </div>
 </div>
 
@@ -2299,8 +2907,10 @@
     groupBy: 'air',
     mineSort: 'recent',
     theme: 'dark',
-    q: ''
+    q: '',
+    bulk: false
   };
+  var bulkSel = Object.create(null);
 
   var myMap = loadMine();
   var myDeleted = loadDeleted();
@@ -2412,11 +3022,28 @@
     return true;
   }
 
-  function toast(msg) {
-    toastEl.textContent = msg;
-    toastEl.classList.add('show');
+  function toast(msg, action) {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 1800);
+    toastEl.innerHTML = '';
+    var text = document.createElement('span');
+    text.textContent = msg;
+    toastEl.appendChild(text);
+    var wait = 1800;
+    if (action && action.label && typeof action.fn === 'function') {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'toastAct';
+      btn.textContent = action.label;
+      btn.addEventListener('click', function () {
+        clearTimeout(toastTimer);
+        toastEl.classList.remove('show');
+        action.fn();
+      });
+      toastEl.appendChild(btn);
+      wait = 5000;
+    }
+    toastEl.classList.add('show');
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, wait);
   }
 
   // ---- 备份提示：有收藏时提示是否导出过，导出后记录时间 ----
@@ -2940,6 +3567,7 @@
   function searchRank(x, q) {
     var cn = String(x.cn || '').toLowerCase();
     var n = String(x.n || '').toLowerCase();
+    var py = String(x.py || '');
     var fields = [cn, n];
     var best = 3;
     fields.forEach(function (f) {
@@ -2948,6 +3576,11 @@
       else if (f.indexOf(q) === 0) best = Math.min(best, 1);
       else if (f.indexOf(q) >= 0) best = Math.min(best, 2);
     });
+    if (py && /^[a-z0-9]+$/.test(q)) {
+      if (py === q) best = Math.min(best, 0);
+      else if (py.indexOf(q) === 0) best = Math.min(best, 1);
+      else if (py.indexOf(q) >= 0) best = Math.min(best, 2);
+    }
     // 多关键词时整串通常不会命中，退而用首个关键词的匹配档位排序
     var tokens = searchTokens(q).filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
     if (best === 3 && tokens.length > 1) {
@@ -2957,6 +3590,7 @@
         if (f.indexOf(head) === 0) best = Math.min(best, 1);
         else if (f.indexOf(head) >= 0) best = Math.min(best, 2);
       });
+      if (py && /^[a-z0-9]+$/.test(head) && py.indexOf(head) >= 0) best = Math.min(best, 2);
     }
     return best;
   }
@@ -2975,8 +3609,10 @@
         list = list.filter(function (x) {
           var cn = String(x.cn || '').toLowerCase();
           var n = String(x.n || '').toLowerCase();
+          var py = String(x.py || '');
           return tokens.every(function (t) {
-            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0;
+            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0 ||
+              (/^[a-z0-9]+$/.test(t) && py.indexOf(t) >= 0);
           });
         });
       }
@@ -2984,8 +3620,10 @@
         list = list.filter(function (x) {
           var cn = String(x.cn || '').toLowerCase();
           var n = String(x.n || '').toLowerCase();
+          var py = String(x.py || '');
           return !excludes.some(function (t) {
-            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0;
+            return cn.indexOf(t) >= 0 || n.indexOf(t) >= 0 ||
+              (/^[a-z0-9]+$/.test(t) && py.indexOf(t) >= 0);
           });
         });
       }
@@ -3098,35 +3736,44 @@
       ? '<div class="cprog" title="观看进度">' +
           '<button type="button" data-act="epminus"' + (ep <= 0 ? ' disabled' : '') +
             ' aria-label="减少一话">−</button>' +
-          '<span><b>' + ep + '</b>' + (total ? ' / ' + total : '') + ' 话</span>' +
+          '<input class="epin" type="number" inputmode="numeric" min="0" max="' + (total || 9999) + '" value="' + ep +
+            '" data-act="epinput" aria-label="已看集数">' +
+          '<span class="eptotal">' + (total ? '/ ' + total + ' 话' : '话') + '</span>' +
           '<button type="button" data-act="epplus"' + (total > 0 && ep >= total ? ' disabled' : '') +
             ' aria-label="增加一话">＋</button>' +
         '</div>'
       : '';
+    var selecting = state.bulk && state.tab === 'mine';
+    var selected = selecting && bulkSel[id];
+    var phHue = Number(String(x.i).slice(-3)) % 360;
 
-    return '<div class="card' + (picked ? ' picked' : '') + '" data-id="' + id + '" role="button" tabindex="0" aria-pressed="' + picked + '" title="' + escapeHtml(titleText) + '">' +
-      '<div class="cover' + (x.img ? '' : ' noimg') + '">' +
-        (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
-          (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
-          ' alt="" onload="this.parentElement.classList.add(\'loaded\')" onerror="this.style.display=\'none\';this.parentElement.classList.add(\'noimg\')">' : '') +
-        '<span class="ph">' + escapeHtml(initial) + '</span>' +
-        (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +
-        (x.p ? '<span class="badge plat">' + escapeHtml(x.p) + '</span>' : '') +
-        (entry
-          ? '<span class="badge status s-' + escapeHtml(entry.s || 'done') + '">' + escapeHtml(STATUS[entry.s] || '看完') + '</span>'
-          : '') +
-      '</div>' +
-      '<div class="body">' +
-        '<div class="title">' + title + '</div>' +
-        '<div class="sub">' + sub + '</div>' +
-        '<div class="meta">' + escapeHtml(meta) + '</div>' +
-        '<div class="ctools">' +
-          '<button class="ctool' + (picked ? ' on' : '') + '" type="button" data-act="toggle">' +
-            (picked ? '移出' : '＋ 加入') + '</button>' +
-          prog +
+    return '<article class="card' + (picked ? ' picked' : '') + (selected ? ' selected' : '') + '" data-id="' + id + '" title="' + escapeHtml(titleText) + '">' +
+      (selecting ? '<button class="selbox" type="button" data-act="select" aria-label="选择《' + escapeHtml(titleText) + '》" aria-pressed="' + !!selected + '">✓</button>' : '') +
+      '<a class="card-link" href="#d=' + id + '" tabindex="-1" aria-label="查看《' + escapeHtml(titleText) + '》详情">' +
+        '<div class="cover' + (x.img ? '' : ' noimg') + '" style="--phh:' + phHue + '">' +
+          (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
+            (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
+            ' alt="" onload="this.parentElement.classList.add(\'loaded\')" onerror="this.style.display=\'none\';this.parentElement.classList.add(\'noimg\')">' : '') +
+          '<span class="ph">' + escapeHtml(initial) + '</span>' +
+          (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +
+          (x.p ? '<span class="badge plat">' + escapeHtml(x.p) + '</span>' : '') +
+          (entry
+            ? '<span class="badge status s-' + escapeHtml(entry.s || 'done') + '">' + escapeHtml(STATUS[entry.s] || '看完') + '</span>'
+            : '') +
         '</div>' +
+        '<div class="body">' +
+          '<div class="title">' + title + '</div>' +
+          '<div class="sub">' + sub + '</div>' +
+          '<div class="meta">' + escapeHtml(meta) + '</div>' +
+        '</div>' +
+      '</a>' +
+      '<div class="ctools">' +
+        '<button class="ctool' + (picked ? ' on' : '') + '" type="button" data-act="toggle">' +
+          (picked ? '移出' : '＋ 加入') + '</button>' +
+        '<button class="ctool icon" type="button" data-act="menu" aria-label="更多操作" title="更多操作">⋯</button>' +
+        prog +
       '</div>' +
-    '</div>';
+    '</article>';
   }
 
   // 按年份季度分组，便于回顾「什么时候追了什么」；可切换按首播季度或按加入年份
@@ -3173,6 +3820,250 @@
     return '<div class="board">' + cols.join('') + '</div>';
   }
 
+  // 按观看状态分组，可折叠，便于集中处理一类番
+  function statusGroupsHtml(list) {
+    return STATUS_ORDER.map(function (s) {
+      var items = list.filter(function (x) {
+        var entry = myMap[String(x.i)];
+        return entry && entry.s === s;
+      });
+      if (!items.length) return '';
+      return '<details class="st-group" open><summary>' + STATUS[s] +
+        '<span class="n">' + items.length + ' 部</span></summary>' +
+        '<div class="grid mine-mode">' + items.map(cardHtml).join('') + '</div></details>';
+    }).join('');
+  }
+
+  var WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+  // 本季日历：按首播日期的星期分列，快速看每天有什么
+  function calendarHtml(list) {
+    var cols = WEEK_LABELS.map(function () { return []; });
+    list.forEach(function (x) {
+      var d = x.d ? new Date(x.d + 'T00:00:00') : null;
+      var day = d && !isNaN(d.getTime()) ? d.getDay() : 1;
+      cols[day].push(x);
+    });
+    return cols.map(function (items, i) {
+      items.sort(function (a, b) { return String(a.d).localeCompare(String(b.d)); });
+      return '<section class="cal-col"><h3 class="cal-head">' + WEEK_LABELS[i] +
+        ' · ' + items.length + '</h3>' +
+        (items.length ? items.map(function (x) {
+          var titleText = x.cn || x.n || '未知番剧';
+          var entry = myMap[String(x.i)];
+          return '<a class="cal-item" href="#d=' + x.i + '" data-id="' + x.i + '">' +
+            '<span class="ci-cover"><span class="ci-ph">' + escapeHtml(String(titleText).charAt(0)) + '</span>' +
+            (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
+              (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="40px"' : '') +
+              ' alt="" onerror="this.style.display=\'none\'">' : '') +
+            '</span>' +
+            '<span class="ci-main"><span class="ci-date">' + escapeHtml(x.d || '日期待定') + '</span>' +
+            '<span class="ci-title">' + highlightHtml(titleText, state.q.trim()) + '</span>' +
+            (entry ? '<span class="ci-state">' + escapeHtml(STATUS[entry.s] || '') + '</span>' : '') +
+            '</span></a>';
+        }).join('') : '<div class="cal-empty">无</div>') +
+        '</section>';
+    }).join('');
+  }
+
+  // ---- 已启用筛选的 chips：可单独移除，避免“为什么结果变少” ----
+  function chipLabel(id) {
+    var el = $(id);
+    return el && el.selectedOptions && el.selectedOptions[0] ? el.selectedOptions[0].textContent : '';
+  }
+
+  function renderChips() {
+    var el = $('filterChips');
+    if (!el) return;
+    var chips = [];
+    if (state.q.trim()) chips.push({ k: 'q', label: '搜索', v: state.q.trim() });
+    if (state.platform !== 'all') chips.push({ k: 'platform', label: '平台', v: chipLabel('platform') });
+    if (state.region !== 'all') chips.push({ k: 'region', label: '地区', v: chipLabel('region') });
+    if (state.sort !== 'score') chips.push({ k: 'sort', label: '排序', v: chipLabel('sort') });
+    if (state.status !== 'all') chips.push({ k: 'status', label: '状态', v: STATUS[state.status] || state.status });
+    if (state.onlyMine) chips.push({ k: 'onlyMine', label: '范围', v: '只看已收藏' });
+    if (state.highScore) chips.push({ k: 'highScore', label: '评分', v: '≥8.0' });
+    if (state.hideMine) chips.push({ k: 'hideMine', label: '范围', v: '隐藏已收藏' });
+    if (!chips.length) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    el.hidden = false;
+    el.innerHTML = chips.map(function (c) {
+      return '<span class="chip"><b>' + escapeHtml(c.label) + '</b>' + escapeHtml(c.v) +
+        '<button type="button" data-chip="' + c.k + '" aria-label="移除' + escapeHtml(c.label) + '筛选">×</button></span>';
+    }).join('');
+  }
+
+  function clearChip(key) {
+    if (key === 'q') {
+      state.q = '';
+      searchEl.value = '';
+      $('searchHist').hidden = true;
+    } else if (key === 'platform') {
+      state.platform = 'all';
+      $('platform').value = 'all';
+    } else if (key === 'region') {
+      state.region = 'all';
+      $('region').value = 'all';
+    } else if (key === 'sort') {
+      state.sort = 'score';
+      $('sort').value = 'score';
+    } else if (key === 'status') {
+      state.status = 'all';
+    } else if (key === 'onlyMine') {
+      state.onlyMine = false;
+    } else if (key === 'highScore') {
+      state.highScore = false;
+    } else if (key === 'hideMine') {
+      state.hideMine = false;
+    }
+    syncControls();
+    render();
+  }
+
+  // ---- 批量选择 ----
+  function renderBulkBar() {
+    var bar = $('bulkBar');
+    if (!bar) return;
+    var on = state.bulk && state.tab === 'mine';
+    var count = Object.keys(bulkSel).length;
+    // 未选中任何番剧时不显示底部操作栏，避免遮挡内容
+    bar.hidden = !on || count === 0;
+    $('bulkBtn').textContent = on ? '退出批量' : '批量';
+    $('bulkBtn').classList.toggle('on', on);
+    $('bulkCount').textContent = '已选 ' + count + ' 部';
+  }
+
+  function toggleBulk() {
+    state.bulk = !state.bulk;
+    bulkSel = Object.create(null);
+    render();
+  }
+
+  function bulkApply(kind) {
+    var ids = Object.keys(bulkSel);
+    if (!ids.length) {
+      toast('先选择要操作的番剧');
+      return;
+    }
+    var snapshot = {};
+    ids.forEach(function (id) {
+      if (myMap[id]) snapshot[id] = { s: myMap[id].s, t: myMap[id].t, ep: myMap[id].ep, u: myMap[id].u };
+    });
+    if (kind === 'remove') {
+      ids.forEach(function (id) {
+        delete myMap[id];
+        markDeleted(id);
+      });
+    } else {
+      ids.forEach(function (id) {
+        if (!myMap[id]) myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+        myMap[id].s = kind;
+        myMap[id].u = Date.now();
+      });
+    }
+    saveMine();
+    if (kind === 'remove') markAllDeleted(ids);
+    bulkSel = Object.create(null);
+    state.bulk = false;
+    render();
+    var verb = kind === 'remove' ? '移出' : '标记为' + STATUS[kind];
+    toast('已' + verb + ' ' + ids.length + ' 部', {
+      label: '撤销',
+      fn: function () {
+        ids.forEach(function (id) { clearDeleted(id); });
+        Object.keys(snapshot).forEach(function (id) { myMap[id] = snapshot[id]; });
+        ids.forEach(function (id) {
+          if (!snapshot[id]) delete myMap[id];
+        });
+        saveMine();
+        render();
+        toast('已撤销批量操作');
+      }
+    });
+  }
+
+  function markAllDeleted(ids) {
+    ids.forEach(markDeleted);
+  }
+
+  // ---- 云同步状态常驻显示 ----
+  var syncHint = { text: '', tone: '' };
+  function renderSyncState() {
+    var el = $('syncState');
+    if (!el) return;
+    if (!(syncCfg && syncCfg.token && syncCfg.gistId)) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.textContent = syncHint.text || '云同步已开启';
+    el.className = 'syncstate' + (syncHint.tone === 'ok' ? ' ok' : syncHint.tone === 'err' ? ' err' : ' busy');
+  }
+
+  // ---- 保存筛选视图 ----
+  var VIEWS_KEY = 'yuc_views_v1';
+  function loadViews() {
+    if (!canStore) return [];
+    try {
+      var arr = JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveViews(arr) {
+    if (!canStore) return;
+    try { localStorage.setItem(VIEWS_KEY, JSON.stringify(arr.slice(0, 12))); } catch (e) { /* 忽略 */ }
+  }
+  function currentView(name) {
+    return {
+      name: name,
+      tab: state.tab, q: state.q, year: state.year, season: state.season,
+      platform: state.platform, region: state.region, sort: state.sort,
+      status: state.status, onlyMine: state.onlyMine, highScore: state.highScore,
+      hideMine: state.hideMine, view: state.view, group: state.group,
+      groupBy: state.groupBy, mineSort: state.mineSort
+    };
+  }
+  function applyView(v) {
+    state.tab = v.tab || 'all';
+    state.q = v.q || '';
+    state.year = v.year || String(META.endYear);
+    state.season = v.season || 'all';
+    state.platform = v.platform || 'all';
+    state.region = v.region || 'all';
+    state.sort = v.sort || 'score';
+    state.status = v.status || 'all';
+    state.onlyMine = !!v.onlyMine;
+    state.highScore = !!v.highScore;
+    state.hideMine = !!v.hideMine;
+    state.view = v.view || 'grid';
+    state.group = !!v.group;
+    state.groupBy = v.groupBy || 'air';
+    state.mineSort = v.mineSort || 'recent';
+    state.bulk = false;
+    bulkSel = Object.create(null);
+    searchEl.value = state.q;
+    document.querySelectorAll('.tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === state.tab);
+    });
+    syncControls();
+    render();
+  }
+  function renderViewsMenu() {
+    var menu = $('viewsMenu');
+    var views = loadViews();
+    var html = views.length
+      ? views.map(function (v, i) {
+        return '<button type="button" data-view-apply="' + i + '">' + escapeHtml(v.name) +
+          '<span class="vdel" data-view-del="' + i + '" role="button" aria-label="删除视图">×</span></button>';
+      }).join('')
+      : '<div class="popmenu-empty">还没有保存的视图</div>';
+    html += '<hr><button type="button" data-view-save="1">保存当前筛选为视图</button>';
+    menu.innerHTML = html;
+  }
+
   function render() {
     var list = filteredList();
     $('mineCount').textContent = Object.keys(myMap).length;
@@ -3180,9 +4071,12 @@
     $('filters').style.display = state.tab === 'mine' ? 'none' : 'flex';
     $('filterToggle').style.display = state.tab === 'mine' ? 'none' : '';
     var activeFilters = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
-      (state.sort !== 'score' ? 1 : 0) + (state.view !== 'grid' ? 1 : 0) +
+      (state.sort !== 'score' ? 1 : 0) +
       (state.onlyMine ? 1 : 0) + (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0);
     $('filterToggle').textContent = activeFilters ? '筛选 · ' + activeFilters : '筛选';
+    renderChips();
+    renderBulkBar();
+    renderSyncState();
     // 常驻「清除筛选」：有筛选条件时才出现，避免空结果时才找得到重置入口
     var filterCount = (state.platform !== 'all' ? 1 : 0) + (state.region !== 'all' ? 1 : 0) +
       (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
@@ -3215,24 +4109,38 @@
     $('resultbar').innerHTML = label;
 
     var board = state.tab === 'mine' && state.view === 'board';
+    var calendar = state.tab !== 'mine' && state.view === 'calendar';
     $('boardBtn').textContent = board ? '网格视图' : '看板视图';
+    $('calBtn').textContent = calendar ? '网格视图' : '首播日历';
+    $('calBtn').classList.toggle('on', calendar);
     gridEl.className = 'grid' + (state.view === 'list' ? ' list' : '') +
       (board ? ' board' : '') +
+      (calendar ? ' cal' : '') +
+      (state.tab === 'mine' ? ' mine-mode' : '') +
       (state.tab === 'mine' && state.group && !board ? ' timeline' : '');
     var grouped = state.tab === 'mine' && state.group && !board;
-    var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
+    var shown = board || grouped || calendar ? list : list.slice(0, PAGE_SIZE);
+    if (calendar && shown.length > PAGE_SIZE) shown = shown.slice(0, PAGE_SIZE);
     gridEl.innerHTML = board
       ? boardHtml(list)
       : grouped
-        ? timelineHtml(shown)
-        : shown.map(cardHtml).join('');
+        ? (state.groupBy === 'status' ? statusGroupsHtml(shown) : timelineHtml(shown))
+        : calendar
+          ? calendarHtml(shown)
+          : shown.map(cardHtml).join('');
+    gridEl.setAttribute('aria-busy', 'false');
+    // 只让第一张卡片进入 Tab 序列，其余用方向键移动，避免逐卡 Tab 数百次
+    var cardLinks = gridEl.querySelectorAll('.card-link');
+    for (var cli = 0; cli < cardLinks.length; cli += 1) {
+      cardLinks[cli].tabIndex = cli === 0 ? 0 : -1;
+    }
     // 首屏前 5 张封面优先加载，其余保持按需懒加载
     var firstImgs = gridEl.querySelectorAll('.card img');
     for (var bi = 0; bi < firstImgs.length && bi < 5; bi += 1) {
       firstImgs[bi].setAttribute('loading', 'eager');
       firstImgs[bi].setAttribute('fetchpriority', 'high');
     }
-    updateLoadMore(list.length, shown.length, !grouped && !board);
+    updateLoadMore(list.length, shown.length, !grouped && !board && !calendar);
     emptyEl.hidden = list.length > 0;
     if (!list.length) {
       if (state.tab === 'mine') {
@@ -3438,26 +4346,38 @@
     var item = byId.get(id);
     if (!item) return;
     if (myMap[id]) {
+      var prev = myMap[id];
       delete myMap[id];
       markDeleted(id);
-      toast('已移出我的番剧：' + (item.cn || item.n));
+      saveMine();
+      render();
+      toast('已移出我的番剧：' + (item.cn || item.n), {
+        label: '撤销',
+        fn: function () {
+          myMap[id] = prev;
+          clearDeleted(id);
+          saveMine();
+          render();
+          toast('已恢复：' + (item.cn || item.n));
+        }
+      });
     } else {
       myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
       clearDeleted(id);
+      saveMine();
+      render();
       toast('已加入我的番剧：' + (item.cn || item.n));
     }
-    saveMine();
-    render();
   }
 
-  // 我的番剧内直接调整进度；追到最后一话自动转为看完
-  function changeEp(id, delta) {
+  // 直接设置已看集数：0..总话数，追平自动看完，回退自动转回在看
+  function setEp(id, value) {
     var item = byId.get(id);
     var entry = myMap[id];
     if (!item || !entry) return;
     var total = Number(item.e) || 0;
-    var next = Math.max(0, Math.min(total > 0 ? total : 9999, (Number(entry.ep) || 0) + delta));
-    if (next === entry.ep) return;
+    var next = Math.max(0, Math.min(total > 0 ? total : 9999, Math.round(Number(value) || 0)));
+    if (next === (Number(entry.ep) || 0)) return;
     entry.ep = next;
     entry.u = Date.now();
     if (total > 0 && next >= total) entry.s = 'done';
@@ -3465,6 +4385,13 @@
     else if (next > 0 && entry.s === 'want') entry.s = 'doing';
     saveMine();
     render();
+  }
+
+  // 我的番剧内直接调整进度；追到最后一话自动转为看完
+  function changeEp(id, delta) {
+    var entry = myMap[id];
+    if (!entry) return;
+    setEp(id, (Number(entry.ep) || 0) + delta);
   }
 
   // 事件绑定
@@ -3570,6 +4497,305 @@
     this.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
 
+  // ---- 移动端搜索收纳：点图标展开，Esc / 再次点击收起 ----
+  $('searchToggle').addEventListener('click', function () {
+    var bar = document.querySelector('.topbar');
+    var open = bar.classList.toggle('search-open');
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) setTimeout(function () { searchEl.focus(); }, 30);
+  });
+
+  // ---- 头部“更多”菜单 ----
+  function closeMenus(except) {
+    ['moreMenu', 'mineMore', 'viewsMenu'].forEach(function (id) {
+      var el = $(id);
+      if (el && el !== except) el.hidden = true;
+    });
+    $('moreBtn').setAttribute('aria-expanded', 'false');
+    $('mineMoreBtn').setAttribute('aria-expanded', 'false');
+    $('viewsBtn').setAttribute('aria-expanded', 'false');
+  }
+
+  $('moreBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var menu = $('moreMenu');
+    var open = menu.hidden;
+    closeMenus(menu);
+    menu.hidden = !open;
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  $('mineMoreBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var menu = $('mineMore');
+    var open = menu.hidden;
+    closeMenus(menu);
+    menu.hidden = !open;
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  $('moreMenu').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-more]');
+    if (!btn) return;
+    closeMenus();
+    var act = btn.dataset.more;
+    if (act === 'theme') $('themeBtn').click();
+    else if (act === 'help') $('helpBtn').click();
+    else if (act === 'palette') openPalette();
+    else if (act === 'calendar') $('calBtn').click();
+    else if (act === 'export-json') $('exportBtn').click();
+    else if (act === 'export-csv') $('exportCsv').click();
+    else if (act === 'export-md') $('exportMd').click();
+    else if (act === 'import') $('importBtn').click();
+    else if (act === 'sync') $('syncBtn').click();
+  });
+
+  $('mineMore').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-mine]');
+    if (!btn) return;
+    closeMenus();
+    var act = btn.dataset.mine;
+    if (act === 'export-json') $('exportBtn').click();
+    else if (act === 'export-csv') $('exportCsv').click();
+    else if (act === 'export-md') $('exportMd').click();
+    else if (act === 'import') $('importBtn').click();
+    else if (act === 'sync') $('syncBtn').click();
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('.popmenu') || e.target.closest('#moreBtn') ||
+      e.target.closest('#mineMoreBtn') || e.target.closest('#viewsBtn')) return;
+    closeMenus();
+  });
+
+  // ---- 保存筛选视图 ----
+  $('viewsBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var menu = $('viewsMenu');
+    var open = menu.hidden;
+    closeMenus(menu);
+    if (open) renderViewsMenu();
+    menu.hidden = !open;
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  $('viewsMenu').addEventListener('click', function (e) {
+    var del = e.target.closest('[data-view-del]');
+    if (del) {
+      e.stopPropagation();
+      var views = loadViews();
+      views.splice(Number(del.dataset.viewDel), 1);
+      saveViews(views);
+      renderViewsMenu();
+      return;
+    }
+    var apply = e.target.closest('[data-view-apply]');
+    if (apply) {
+      var all = loadViews();
+      var v = all[Number(apply.dataset.viewApply)];
+      closeMenus();
+      if (v) {
+        applyView(v);
+        toast('已套用视图：' + v.name);
+      }
+      return;
+    }
+    if (e.target.closest('[data-view-save]')) {
+      var name = prompt('视图名称', '本季高分未看');
+      if (!name || !name.trim()) return;
+      var arr = loadViews();
+      arr.unshift(currentView(name.trim()));
+      saveViews(arr);
+      renderViewsMenu();
+      toast('已保存视图：' + name.trim());
+    }
+  });
+
+  // ---- 筛选 chips ----
+  $('filterChips').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-chip]');
+    if (!btn) return;
+    clearChip(btn.dataset.chip);
+  });
+
+  // ---- 批量操作 ----
+  $('bulkBtn').addEventListener('click', toggleBulk);
+  $('bulkBar').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-bulk]');
+    if (!btn) return;
+    var kind = btn.dataset.bulk;
+    if (kind === 'cancel') {
+      state.bulk = false;
+      bulkSel = Object.create(null);
+      render();
+      return;
+    }
+    bulkApply(kind);
+  });
+
+  // ---- 日历视图 ----
+  $('calBtn').addEventListener('click', function () {
+    state.view = state.view === 'calendar' ? 'grid' : 'calendar';
+    if (state.tab === 'mine') state.view = 'grid';
+    render();
+  });
+
+  // ---- 命令面板 ----
+  var paletteEl = $('palette');
+  var paletteInput = $('paletteInput');
+  var paletteListEl = $('paletteList');
+  var paletteItems = [];
+  var paletteIndex = 0;
+
+  function paletteCommands() {
+    return [
+      { name: '全部番剧', kind: '切换', run: function () { setTab('all'); } },
+      { name: '我的番剧', kind: '切换', run: function () { setTab('mine'); } },
+      { name: '跳到现在这一季', kind: '筛选', run: function () {
+        state.year = String(META.endYear || now.getFullYear());
+        state.season = String(SEASON_OF_MONTH[now.getMonth() + 1] || 1);
+        state.q = '';
+        searchEl.value = '';
+        syncControls();
+        render();
+      } },
+      { name: '只用高分（≥8.0）', kind: '筛选', run: function () { state.highScore = true; syncControls(); render(); } },
+      { name: '只看已收藏', kind: '筛选', run: function () { state.onlyMine = true; state.hideMine = false; syncControls(); render(); } },
+      { name: '隐藏已收藏', kind: '筛选', run: function () { state.hideMine = true; state.onlyMine = false; syncControls(); render(); } },
+      { name: '本季日历', kind: '视图', run: function () { state.tab = 'all'; state.view = 'calendar'; syncControls(); render(); } },
+      { name: '切换明暗主题', kind: '外观', run: function () { $('themeBtn').click(); } },
+      { name: '云同步设置', kind: '数据', run: function () { $('syncBtn').click(); } },
+      { name: '导出 JSON', kind: '数据', run: function () { $('exportBtn').click(); } },
+      { name: '键盘快捷键', kind: '帮助', run: function () { $('helpBtn').click(); } },
+      { name: '清除全部筛选', kind: '筛选', run: function () {
+        state.q = '';
+        searchEl.value = '';
+        state.platform = 'all';
+        state.region = 'all';
+        state.sort = 'score';
+        state.status = 'all';
+        state.onlyMine = false;
+        state.highScore = false;
+        state.hideMine = false;
+        syncControls();
+        render();
+      } }
+    ];
+  }
+
+  function setTab(tab) {
+    closeDetail();
+    document.querySelectorAll('.tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    state.tab = tab;
+    state.bulk = false;
+    bulkSel = Object.create(null);
+    render();
+  }
+
+  function renderPalette() {
+    var q = paletteInput.value.trim().toLowerCase();
+    var cmds = paletteCommands().filter(function (c) {
+      return !q || (c.name.toLowerCase().indexOf(q) >= 0 || c.kind.toLowerCase().indexOf(q) >= 0);
+    });
+    paletteItems = cmds.map(function (c) {
+      return { kind: 'cmd', name: c.name, sub: c.kind, run: c.run };
+    });
+    if (q) {
+      var found = [];
+      for (var i = 0; i < DATA.length && found.length < 6; i += 1) {
+        var x = DATA[i];
+        var cn = String(x.cn || '').toLowerCase();
+        var n = String(x.n || '').toLowerCase();
+        var py = String(x.py || '');
+        if (cn.indexOf(q) >= 0 || n.indexOf(q) >= 0 || py.indexOf(q) >= 0) {
+          found.push(x);
+        }
+      }
+      found.forEach(function (x) {
+        paletteItems.push({
+          kind: 'anime',
+          name: x.cn || x.n || '未知番剧',
+          sub: [x.d, x.p].filter(Boolean).join(' · '),
+          run: function () { openDetail(String(x.i)); }
+        });
+      });
+    }
+    if (paletteIndex >= paletteItems.length) paletteIndex = 0;
+    if (!paletteItems.length) {
+      paletteListEl.innerHTML = '<div class="palette-empty">没有匹配的命令或番剧</div>';
+      return;
+    }
+    paletteListEl.innerHTML = paletteItems.map(function (it, i) {
+      return '<button type="button" class="palette-item' + (i === paletteIndex ? ' active' : '') + '" data-pidx="' + i + '">' +
+        '<span class="pname">' + escapeHtml(it.name) + '</span>' +
+        '<span class="pkind">' + escapeHtml(it.sub) + '</span></button>';
+    }).join('');
+  }
+
+  function openPalette() {
+    paletteEl.hidden = false;
+    paletteInput.value = '';
+    paletteIndex = 0;
+    renderPalette();
+    setTimeout(function () { paletteInput.focus(); }, 30);
+  }
+
+  function closePalette() {
+    paletteEl.hidden = true;
+  }
+
+  paletteInput.addEventListener('input', function () {
+    paletteIndex = 0;
+    renderPalette();
+  });
+
+  paletteInput.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!paletteItems.length) return;
+      paletteIndex = (paletteIndex + (e.key === 'ArrowDown' ? 1 : -1) + paletteItems.length) % paletteItems.length;
+      renderPalette();
+      var active = paletteListEl.querySelector('.palette-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var item = paletteItems[paletteIndex];
+      if (item) {
+        closePalette();
+        item.run();
+      }
+    } else if (e.key === 'Escape') {
+      closePalette();
+    }
+  });
+
+  paletteListEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-pidx]');
+    if (!btn) return;
+    var item = paletteItems[Number(btn.dataset.pidx)];
+    if (!item) return;
+    closePalette();
+    item.run();
+  });
+
+  $('paletteMask').addEventListener('click', closePalette);
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openPalette();
+      return;
+    }
+    if (e.key === 'Escape') {
+      closePalette();
+      closeMenus();
+      var bar = document.querySelector('.topbar');
+      if (bar) bar.classList.remove('search-open');
+    }
+  });
+
   $('loadMoreBtn').addEventListener('click', function () {
     var list = filteredList();
     var start = gridEl.querySelectorAll('.card').length;
@@ -3624,9 +4850,9 @@
     render();
   });
 
-  // 分组方式：按首播季度（何时播出）或按加入年份（何时追的）
+  // 分组方式：按首播季度、按加入年份或按观看状态
   $('groupBy').addEventListener('change', function () {
-    state.groupBy = this.value === 'added' ? 'added' : 'air';
+    state.groupBy = ['added', 'status'].indexOf(this.value) >= 0 ? this.value : 'air';
     render();
   });
 
@@ -3738,13 +4964,34 @@
       var actCard = act.closest('.card');
       if (!actCard) return;
       var actId = actCard.dataset.id;
-      if (act.dataset.act === 'toggle') toggleMine(actId);
-      else if (act.dataset.act === 'epplus') changeEp(actId, 1);
-      else if (act.dataset.act === 'epminus') changeEp(actId, -1);
+      var kind = act.dataset.act;
+      if (kind === 'toggle') toggleMine(actId);
+      else if (kind === 'epplus') changeEp(actId, 1);
+      else if (kind === 'epminus') changeEp(actId, -1);
+      else if (kind === 'menu') openCardMenu(actCard);
+      else if (kind === 'select') {
+        if (bulkSel[actId]) delete bulkSel[actId];
+        else bulkSel[actId] = true;
+        render();
+      }
+      return;
+    }
+    var calItem = e.target.closest('.cal-item');
+    if (calItem) {
+      e.preventDefault();
+      openDetail(calItem.dataset.id);
       return;
     }
     var card = e.target.closest('.card');
     if (!card) return;
+    if (state.bulk && state.tab === 'mine') {
+      var bid = card.dataset.id;
+      if (bulkSel[bid]) delete bulkSel[bid];
+      else bulkSel[bid] = true;
+      render();
+      return;
+    }
+    e.preventDefault();
     // 长按刚结束时浏览器只会补一个 click，拦下这一次即可，避免误开详情
     if (suppressClick) {
       suppressClick = false;
@@ -3753,13 +5000,62 @@
     openDetail(card.dataset.id);
   });
 
-  // 卡片改为 div 后需自行处理 Enter / 空格打开详情
+  // 直接输入集数：失焦或回车时提交
+  gridEl.addEventListener('change', function (e) {
+    var input = e.target.closest('[data-act="epinput"]');
+    if (!input) return;
+    var card = input.closest('.card');
+    if (!card) return;
+    setEp(card.dataset.id, input.value);
+  });
   gridEl.addEventListener('keydown', function (e) {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    var card = e.target.closest('.card');
-    if (!card || e.target !== card) return;
+    var input = e.target.closest('[data-act="epinput"]');
+    if (input && e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    }
+  });
+
+  // 卡片链接自带 href：Enter 由浏览器触发 click；空格需要手动转为打开
+  gridEl.addEventListener('keydown', function (e) {
+    var link = e.target.closest('.card-link');
+    if (!link) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var card = link.closest('.card');
+      if (card) openDetail(card.dataset.id);
+      return;
+    }
+    if (e.key !== ' ' && e.key !== 'Spacebar') return;
     e.preventDefault();
-    openDetail(card.dataset.id);
+    var card2 = link.closest('.card');
+    if (card2) openDetail(card2.dataset.id);
+  });
+
+  // 方向键在卡片间移动焦点，配合 roving tabindex
+  gridEl.addEventListener('keydown', function (e) {
+    var link = e.target.closest('.card-link');
+    if (!link) return;
+    var keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+    if (keys.indexOf(e.key) < 0) return;
+    var cards = [].slice.call(gridEl.querySelectorAll('.card-link'));
+    var idx = cards.indexOf(link);
+    if (idx < 0) return;
+    var step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (!step) {
+      var firstTop = cards[0].getBoundingClientRect().top;
+      var cols = 0;
+      while (cols < cards.length && Math.abs(cards[cols].getBoundingClientRect().top - firstTop) < 4) cols += 1;
+      cols = Math.max(1, cols);
+      step = e.key === 'ArrowUp' ? -cols : cols;
+    }
+    var next = Math.max(0, Math.min(cards.length - 1, idx + step));
+    if (next === idx) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cards.forEach(function (c) { c.tabIndex = -1; });
+    cards[next].tabIndex = 0;
+    cards[next].focus();
   });
 
   // ---- 卡片长按：浮出快捷状态菜单，省去先进详情再改状态 ----
@@ -4115,11 +5411,20 @@
       var cards = Array.prototype.slice.call(gridEl.querySelectorAll('.card'));
       if (!cards.length) return;
       e.preventDefault();
-      var idx = cards.indexOf(document.activeElement);
+      var focused = document.activeElement && document.activeElement.closest
+        ? document.activeElement.closest('.card')
+        : null;
+      var idx = cards.indexOf(focused);
       var next = idx < 0 ? 0 : idx + (e.key === 'ArrowDown' ? 1 : -1);
       if (next < 0) next = 0;
       if (next > cards.length - 1) next = cards.length - 1;
-      cards[next].focus();
+      var target = cards[next].querySelector('.card-link') || cards[next];
+      cards.forEach(function (c) {
+        var l = c.querySelector('.card-link');
+        if (l) l.tabIndex = -1;
+      });
+      target.tabIndex = 0;
+      target.focus();
     }
   });
 
@@ -4263,13 +5568,28 @@
   $('clearBtn').addEventListener('click', function () {
     if (!Object.keys(myMap).length) { toast('列表已经是空的'); return; }
     if (!confirm('确定清空「我的番剧」吗？建议先导出备份。')) return;
+    var snapshot = {};
+    var ids = Object.keys(myMap);
+    ids.forEach(function (id) {
+      snapshot[id] = { s: myMap[id].s, t: myMap[id].t, ep: myMap[id].ep, u: myMap[id].u };
+    });
     var ts = Date.now();
-    Object.keys(myMap).forEach(function (id) { myDeleted[id] = ts; });
+    ids.forEach(function (id) { myDeleted[id] = ts; });
     myMap = {};
     persistDeleted();
     saveMine();
     render();
-    toast('已清空我的番剧');
+    toast('已清空我的番剧（' + ids.length + ' 部）', {
+      label: '撤销',
+      fn: function () {
+        ids.forEach(clearDeleted);
+        myMap = snapshot;
+        persistDeleted();
+        saveMine();
+        render();
+        toast('已恢复 ' + ids.length + ' 部');
+      }
+    });
   });
 
   // ---- 云同步：GitHub Gist（Token 仅保存在本机） ----
@@ -4296,10 +5616,13 @@
   }
 
   function setSyncStatus(text, tone) {
+    syncHint = { text: text || '', tone: tone || '' };
     var el = $('syncStatus');
-    if (!el) return;
-    el.textContent = text || '';
-    el.className = 'sync-status' + (tone ? ' ' + tone : '');
+    if (el) {
+      el.textContent = text || '';
+      el.className = 'sync-status' + (tone ? ' ' + tone : '');
+    }
+    renderSyncState();
   }
 
   function fmtTime(ts) {
@@ -4524,6 +5847,7 @@
 
   function scheduleSync() {
     if (!syncCfg || !syncCfg.token || !syncCfg.gistId) return;
+    setSyncStatus('待同步', '');
     clearTimeout(syncTimer);
     syncTimer = setTimeout(function () { syncNow(true); }, 2500);
   }
@@ -4597,7 +5921,7 @@
     if (!el) return;
     if (!DATA.length) { el.textContent = '数据未就绪'; return; }
     el.textContent = fullReady
-      ? '共 ' + DATA.length + ' 部 · ' + (META.startYear || '') + '–' + (META.endYear || '')
+      ? '共 ' + DATA.length + ' 部'
       : (fullState === 'failed'
         ? '最近一年 ' + DATA.length + ' 部 · 全库加载失败'
         : '最近一年 ' + DATA.length + ' 部 · 全库加载中…');
@@ -4623,11 +5947,14 @@
     if (fullReady) return;
     fullReady = true;
     fullState = 'ready';
+    var keepY = window.scrollY;
     adoptData();
     fillFilterOptions();
     syncControls();
     render();
+    window.scrollTo(0, keepY);
     updateDataHint();
+    $('loadBar').hidden = true;
     window.__FULL_DATA_READY = true;
   }
 
@@ -4638,6 +5965,7 @@
       fullState = 'failed';
       updateDataHint();
       render();
+      $('loadBar').hidden = true;
       return;
     }
     var s = document.createElement('script');
@@ -4676,6 +6004,7 @@
     if (fullState === 'loading') return;
     fullState = 'loading';
     fullTry = 0;
+    $('loadBar').hidden = false;
     updateDataHint();
     tryFullSource();
   }
@@ -4723,3 +6052,4 @@
 </script>
 </body>
 </html>
+
