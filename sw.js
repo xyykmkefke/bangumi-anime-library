@@ -1,11 +1,14 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-anime-shell-v7';
+var CACHE = 'yuc-anime-shell-v8';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE).then(function (cache) {
-      return cache.addAll(SHELL);
+      // 强制走网络，避免 HTTP 缓存让新版本壳继续用旧文件
+      return cache.addAll(SHELL.map(function (url) {
+        return new Request(url, { cache: 'reload' });
+      }));
     }).then(function () {
       return self.skipWaiting();
     })
@@ -34,8 +37,10 @@ self.addEventListener('fetch', function (e) {
       caches.match(req).then(function (hit) {
         if (hit) return hit;
         return fetch(req).then(function (res) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          if (res.ok) {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          }
           return res;
         });
       })
@@ -44,6 +49,24 @@ self.addEventListener('fetch', function (e) {
   }
 
   var url = new URL(req.url);
+
+  // 全库数据走 jsDelivr：缓存优先，离线时也能打开
+  if (url.hostname.indexOf('jsdelivr.net') >= 0) {
+    e.respondWith(
+      caches.match(req).then(function (hit) {
+        var net = fetch(req).then(function (res) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          return res;
+        }).catch(function () {
+          return hit;
+        });
+        return hit || net;
+      })
+    );
+    return;
+  }
+
   if (url.origin !== self.location.origin) return;
 
   // 页面本身：网络优先；1.5s 内没回来就先展示缓存，等下次启动再用新版
@@ -51,8 +74,10 @@ self.addEventListener('fetch', function (e) {
     e.respondWith(
       caches.match(req).then(function (hit) {
         var net = fetch(req).then(function (res) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          if (res.ok) {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          }
           return res;
         }).catch(function () {
           return hit || caches.match('./index.html');
@@ -71,8 +96,10 @@ self.addEventListener('fetch', function (e) {
   e.respondWith(
     caches.match(req).then(function (hit) {
       var net = fetch(req).then(function (res) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+        if (res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+        }
         return res;
       }).catch(function () {
         return hit;

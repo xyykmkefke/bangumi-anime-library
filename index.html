@@ -16,8 +16,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
+<link rel="preconnect" href="https://gcore.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.0">
+<meta name="version" content="1.5.1">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2172,7 +2175,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.5.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.5.1</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3250,7 +3253,9 @@
         emptyEl.innerHTML = '<b>这个范围内没有未收藏的番剧</b>关闭「隐藏已收藏」即可看到已收藏条目' +
           '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
       } else if (!fullReady) {
-        emptyEl.innerHTML = '<b>全库数据正在加载</b>最近一年已可用，稍候即可浏览其他年份';
+        emptyEl.innerHTML = fullState === 'failed'
+          ? '<b>全库数据加载失败</b>网络较慢或 CDN 不可用 <button class="btn" id="retryFull" type="button">重新加载</button>'
+          : '<b>全库数据正在加载</b>最近一年已可用，稍候即可浏览其他年份';
       } else if (DATA.length) {
         emptyEl.innerHTML = '<b>没有找到符合条件的番剧</b>换个年份或关键词试试' +
           '<br><button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
@@ -3477,6 +3482,7 @@
     var btn = e.target.closest('[data-year]');
     if (!btn) return;
     state.year = btn.dataset.year;
+    if (!fullReady) loadFullData();
     renderYears();
     render();
   });
@@ -3485,6 +3491,7 @@
     var btn = e.target.closest('[data-season]');
     if (!btn) return;
     state.season = btn.dataset.season;
+    if (!fullReady) loadFullData();
     renderSeasons();
     render();
   });
@@ -3574,6 +3581,11 @@
 
   // 空结果时一键清除筛选，回到最新年份的全量列表
   emptyEl.addEventListener('click', function (e) {
+    if (e.target.closest('#retryFull')) {
+      loadFullData();
+      render();
+      return;
+    }
     if (e.target.closest('#clearMineFilter')) {
       if (state.q) {
         state.q = '';
@@ -3638,6 +3650,7 @@
   searchEl.addEventListener('input', function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () {
+      if (!fullReady && searchEl.value.trim()) loadFullData();
       state.q = searchEl.value;
       // 全库搜索清空后，状态过滤随之失效，避免下次搜索被静默限制
       if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
@@ -4585,25 +4598,86 @@
     if (!DATA.length) { el.textContent = '数据未就绪'; return; }
     el.textContent = fullReady
       ? '共 ' + DATA.length + ' 部 · ' + (META.startYear || '') + '–' + (META.endYear || '')
-      : '最近一年 ' + DATA.length + ' 部 · 全库加载中…';
+      : (fullState === 'failed'
+        ? '最近一年 ' + DATA.length + ' 部 · 全库加载失败'
+        : '最近一年 ' + DATA.length + ' 部 · 全库加载中…');
   }
 
-  // 首屏之后补齐完整数据：先让最近一年可见，再后台换入全库并重绘
-  function loadFullData() {
-    if (fullReady) { window.__FULL_DATA_READY = true; return; }
-    var s = document.createElement('script');
-    s.src = 'data/anime-data.js';
-    s.async = true;
-    s.onload = function () {
-      fullReady = true;
-      adoptData();
-      fillFilterOptions();
-      syncControls();
-      render();
+  // 首屏之后补齐完整数据：优先走 jsDelivr（比 Pages 快数倍），失败再回退本站
+  var fullState = fullReady ? 'ready' : 'idle';
+  var fullTry = 0;
+
+  function fullDataSources() {
+    // 本地开发/验收直接读本站，避免依赖外网
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return ['data/anime-data.js'];
+    var suffix = META.generatedAt ? '?v=' + encodeURIComponent(META.generatedAt) : '';
+    var repo = 'gh/xyykmkefke/bangumi-anime-library@main/data/anime-data.js';
+    return [
+      'https://gcore.jsdelivr.net/' + repo + suffix,
+      'https://cdn.jsdelivr.net/' + repo + suffix,
+      'data/anime-data.js'
+    ];
+  }
+
+  function applyFullData() {
+    if (fullReady) return;
+    fullReady = true;
+    fullState = 'ready';
+    adoptData();
+    fillFilterOptions();
+    syncControls();
+    render();
+    updateDataHint();
+    window.__FULL_DATA_READY = true;
+  }
+
+  function tryFullSource() {
+    if (fullReady) return;
+    var list = fullDataSources();
+    if (fullTry >= list.length) {
+      fullState = 'failed';
       updateDataHint();
-      window.__FULL_DATA_READY = true;
+      render();
+      return;
+    }
+    var s = document.createElement('script');
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done || fullReady) return;
+      done = true;
+      fullTry += 1;
+      tryFullSource();
+    }, 10000);
+    s.async = true;
+    s.src = list[fullTry];
+    s.onload = function () {
+      clearTimeout(timer);
+      if (!fullReady && (window.ANIME_DATA || []).length > DATA.length) {
+        applyFullData();
+        return;
+      }
+      if (done) return;
+      done = true;
+      fullTry += 1;
+      tryFullSource();
+    };
+    s.onerror = function () {
+      clearTimeout(timer);
+      if (done || fullReady) return;
+      done = true;
+      fullTry += 1;
+      tryFullSource();
     };
     document.head.appendChild(s);
+  }
+
+  function loadFullData() {
+    if (fullReady) { window.__FULL_DATA_READY = true; return; }
+    if (fullState === 'loading') return;
+    fullState = 'loading';
+    fullTry = 0;
+    updateDataHint();
+    tryFullSource();
   }
 
   renderYears();
