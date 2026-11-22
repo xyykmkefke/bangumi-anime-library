@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.3.0">
+<meta name="version" content="1.4.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2049,6 +2049,31 @@
     .cprog button { width: 32px; }
   }
 
+  /* 云同步弹窗 */
+  .sync-panel { width: min(440px, 100%); }
+  .sync-desc { margin: 0 0 6px; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+  .sync-desc code { padding: 1px 4px; border-radius: 4px; background: var(--panel-2); color: var(--text); font-size: 12px; }
+  .sync-label { display: block; margin: 12px 0 5px; font-size: 12px; color: var(--muted); }
+  .sync-input {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .sync-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .sync-actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .sync-status { font-size: 12px; color: var(--muted-2); }
+  .sync-status.ok { color: var(--accent); }
+  .sync-status.err { color: #ff8f8f; }
+  html[data-theme="light"] .sync-status.err { color: #b42318; }
+  .sync-tip { margin: 14px 0 0; font-size: 11.5px; line-height: 1.65; color: var(--muted-2); }
+
 </style>
 </head>
 <body>
@@ -2131,6 +2156,7 @@
     <button class="btn" id="exportCsv">导出 CSV</button>
     <button class="btn" id="exportMd">导出 Markdown</button>
     <button class="btn" id="importBtn">导入备份</button>
+    <button class="btn" id="syncBtn">云同步</button>
     <button class="btn danger" id="clearBtn">清空</button>
     <span class="backup-hint" id="backupHint" hidden></span>
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
@@ -2145,7 +2171,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.3.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · <span title="项目版本">v1.4.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2197,6 +2223,24 @@
   </div>
 </div>
 
+<div class="help" id="syncModal" hidden>
+  <div class="help-mask" id="syncMask"></div>
+  <div class="help-panel sync-panel" role="dialog" aria-modal="true" aria-label="云同步设置">
+    <h2>云同步（GitHub Gist）</h2>
+    <p class="sync-desc">用一个只包含 <code>gist</code> 权限的 Token，把追番清单存进你的私有 Gist，多台设备打开时自动合并。</p>
+    <label class="sync-label" for="gistToken">访问令牌</label>
+    <input class="sync-input" id="gistToken" type="password" placeholder="github_pat_... 或 ghp_..." autocomplete="off" spellcheck="false">
+    <label class="sync-label" for="gistId">Gist ID（留空则自动创建）</label>
+    <input class="sync-input" id="gistId" type="text" placeholder="例如 3f2a1b..." autocomplete="off" spellcheck="false">
+    <div class="sync-actions">
+      <button class="btn primary" id="syncNowBtn" type="button">保存并同步</button>
+      <button class="btn" id="syncDisconnectBtn" type="button">断开</button>
+      <span class="sync-status" id="syncStatus"></span>
+    </div>
+    <p class="sync-tip">Token 只保存在本机浏览器，同步时数据直连 api.github.com，不经过其他服务器。换设备时用同一个 Token 和 Gist ID 即可接上。</p>
+  </div>
+</div>
+
 <button class="totop" id="toTop" type="button" aria-label="回到顶部" title="回到顶部" hidden>↑</button>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -2213,6 +2257,12 @@
   var PREFS_KEY = 'yuc_prefs_v1';
   var HIST_KEY = 'yuc_search_hist_v1';
   var BACKUP_KEY = 'yuc_backup_v1';
+  var DIRTY_KEY = 'yuc_dirty_v1';
+  var WARN_KEY = 'yuc_backup_warn_v1';
+  var DEL_KEY = 'yuc_deleted_v1';
+  var GIST_KEY = 'yuc_gist_v1';
+  var GIST_FILE = 'yuc-anime-list.json';
+  var DEL_MAX_AGE = 180 * 24 * 60 * 60 * 1000;
   var HIST_MAX = 8;
   var SEASON_OF_MONTH = { 1: 1, 2: 1, 3: 1, 4: 4, 5: 4, 6: 4, 7: 7, 8: 7, 9: 7, 10: 10, 11: 10, 12: 10 };
   var STATUS = { want: '想看', doing: '在看', done: '看完', drop: '弃番' };
@@ -2239,6 +2289,7 @@
   };
 
   var myMap = loadMine();
+  var myDeleted = loadDeleted();
   // 探测本地存储是否可用，不可用时给出常驻提示
   var canStore = (function () {
     try {
@@ -2265,17 +2316,18 @@
   var toastEl = $('toast');
   var toastTimer = null;
 
-  // 兼容旧版数据：数字表示加入时间，视为「看完」；保留观看进度
+  // 兼容旧版数据：数字表示加入时间，视为「看完」；保留观看进度与最后更新时间
   function normalizeEntry(v) {
     if (v == null) return null;
     if (typeof v === 'object') {
       return {
         s: STATUS[v.s] ? v.s : 'done',
         t: Number(v.t) || Date.now(),
-        ep: Math.max(0, Math.round(Number(v.ep) || 0))
+        ep: Math.max(0, Math.round(Number(v.ep) || 0)),
+        u: Number(v.u) || Number(v.t) || Date.now()
       };
     }
-    return { s: 'done', t: Number(v) || Date.now(), ep: 0 };
+    return { s: 'done', t: Number(v) || Date.now(), ep: 0, u: Number(v) || Date.now() };
   }
 
   function loadMine() {
@@ -2295,14 +2347,55 @@
     }
   }
 
-  function saveMine() {
+  // 删除墓碑：多设备同步时用来区分「另一端新加」和「另一端删掉了」
+  function loadDeleted() {
+    try {
+      var raw = localStorage.getItem(DEL_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object') return {};
+      var out = {};
+      var cutoff = Date.now() - DEL_MAX_AGE;
+      Object.keys(parsed).forEach(function (id) {
+        var ts = Number(parsed[id]) || 0;
+        if (ts >= cutoff) out[id] = ts;
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function persistDeleted() {
+    if (!canStore) return;
+    try {
+      localStorage.setItem(DEL_KEY, JSON.stringify(myDeleted));
+    } catch (e) { /* 忽略存储失败 */ }
+  }
+
+  function markDeleted(id) {
+    myDeleted[id] = Date.now();
+    persistDeleted();
+  }
+
+  function clearDeleted(id) {
+    if (!myDeleted[id]) return;
+    delete myDeleted[id];
+    persistDeleted();
+  }
+
+  function saveMine(opts) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
-      return true;
     } catch (e) {
       toast('浏览器禁止本地存储，请及时导出备份');
       return false;
     }
+    // 云同步写入本机时不计数，也不触发回推，避免同步循环
+    if (!opts || !opts.fromSync) {
+      bumpDirty();
+      scheduleSync();
+    }
+    return true;
   }
 
   function toast(msg) {
@@ -2332,9 +2425,15 @@
     }
     el.hidden = false;
     var at = backupAt();
+    var dirty = dirtyCount();
     if (!at) {
       el.textContent = '尚未备份';
       el.title = '建议导出一次 JSON 备份，防止浏览器清理或换设备时丢失记录';
+      return;
+    }
+    if (dirty >= DIRTY_WARN) {
+      el.textContent = '有 ' + dirty + ' 处改动待备份';
+      el.title = '上次备份于 ' + new Date(at).toLocaleString('zh-CN') + '，建议再导出一次';
       return;
     }
     var d = new Date(at);
@@ -2346,8 +2445,39 @@
     if (!canStore) return;
     try {
       localStorage.setItem(BACKUP_KEY, String(Date.now()));
+      localStorage.removeItem(DIRTY_KEY);
     } catch (e) { /* 忽略存储失败 */ }
     renderBackupHint();
+  }
+
+  // ---- 改动计数：累计到阈值后主动提醒备份 ----
+  var DIRTY_WARN = 5;
+
+  function dirtyCount() {
+    if (!canStore) return 0;
+    try {
+      return Number(localStorage.getItem(DIRTY_KEY)) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function bumpDirty() {
+    if (!canStore) return;
+    var n = dirtyCount() + 1;
+    try {
+      localStorage.setItem(DIRTY_KEY, String(n));
+    } catch (e) {
+      return;
+    }
+    if (n < DIRTY_WARN) return;
+    // 同一天只提醒一次，避免每次操作都弹提示
+    var today = new Date().toDateString();
+    try {
+      if (localStorage.getItem(WARN_KEY) === today) return;
+      localStorage.setItem(WARN_KEY, today);
+    } catch (e) { /* 忽略存储失败 */ }
+    toast('已有 ' + n + ' 处改动，建议导出一次备份');
   }
 
   // ---- URL hash 状态：刷新、分享后都能还原筛选条件 ----
@@ -3279,6 +3409,7 @@
     var item = byId.get(id);
     if (!item || !myMap[id] || !STATUS[status]) return;
     myMap[id].s = status;
+    myMap[id].u = Date.now();
     saveMine();
     toast('已标记为「' + STATUS[status] + '」：' + (item.cn || item.n));
     render();
@@ -3290,9 +3421,11 @@
     if (!item) return;
     if (myMap[id]) {
       delete myMap[id];
+      markDeleted(id);
       toast('已移出我的番剧：' + (item.cn || item.n));
     } else {
-      myMap[id] = { s: 'want', t: Date.now(), ep: 0 };
+      myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+      clearDeleted(id);
       toast('已加入我的番剧：' + (item.cn || item.n));
     }
     saveMine();
@@ -3308,6 +3441,7 @@
     var next = Math.max(0, Math.min(total > 0 ? total : 9999, (Number(entry.ep) || 0) + delta));
     if (next === entry.ep) return;
     entry.ep = next;
+    entry.u = Date.now();
     if (total > 0 && next >= total) entry.s = 'done';
     else if (entry.s === 'done') entry.s = 'doing';
     else if (next > 0 && entry.s === 'want') entry.s = 'doing';
@@ -3685,6 +3819,7 @@
     if (removeBtn && id) {
       var ritem = byId.get(id);
       delete myMap[id];
+      markDeleted(id);
       saveMine();
       closeCardMenu();
       toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''));
@@ -3696,9 +3831,11 @@
       var status = statusBtn.dataset.status;
       var isNew = !myMap[id];
       if (isNew) {
-        myMap[id] = { s: status, t: Date.now() };
+        myMap[id] = { s: status, t: Date.now(), ep: 0, u: Date.now() };
+        clearDeleted(id);
       } else {
         myMap[id].s = status;
+        myMap[id].u = Date.now();
       }
       saveMine();
       closeCardMenu();
@@ -3772,9 +3909,11 @@
     if (!item) return;
     if (myMap[id]) {
       delete myMap[id];
+      markDeleted(id);
       toast('已移除：' + (item.cn || item.n));
     } else {
-      myMap[id] = { s: 'want', t: Date.now(), ep: 0 };
+      myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+      clearDeleted(id);
       toast('已加入我的番剧：' + (item.cn || item.n));
     }
     saveMine();
@@ -3878,6 +4017,13 @@
   document.querySelector('.help-mask').addEventListener('click', function () { $('help').hidden = true; });
 
   document.addEventListener('keydown', function (e) {
+    if (!$('syncModal').hidden) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSync();
+      }
+      return;
+    }
     if (!$('help').hidden) {
       if (e.key === 'Escape' || e.key === '?') {
         e.preventDefault();
@@ -3980,7 +4126,13 @@
   $('exportBtn').addEventListener('click', function () {
     var ids = Object.keys(myMap).map(function (id) {
       var entry = myMap[id] || {};
-      return { id: Number(id), status: entry.s || 'done', addedAt: entry.t || 0, ep: entry.ep || 0 };
+      return {
+        id: Number(id),
+        status: entry.s || 'done',
+        addedAt: entry.t || 0,
+        ep: entry.ep || 0,
+        updatedAt: entry.u || entry.t || 0
+      };
     });
     var payload = {
       app: 'yuc-anime-list',
@@ -4056,7 +4208,13 @@
           var ep = Math.max(0, Math.round(Number(isObj && entry.ep) || 0));
           var cur = myMap[id];
           if (!cur) {
-            myMap[id] = { s: status, t: (isObj && entry.addedAt) || (Date.now() + index), ep: ep };
+            myMap[id] = {
+              s: status,
+              t: (isObj && entry.addedAt) || (Date.now() + index),
+              ep: ep,
+              u: (isObj && (entry.updatedAt || entry.addedAt)) || Date.now()
+            };
+            clearDeleted(id);
             added += 1;
             return;
           }
@@ -4079,10 +4237,295 @@
   $('clearBtn').addEventListener('click', function () {
     if (!Object.keys(myMap).length) { toast('列表已经是空的'); return; }
     if (!confirm('确定清空「我的番剧」吗？建议先导出备份。')) return;
+    var ts = Date.now();
+    Object.keys(myMap).forEach(function (id) { myDeleted[id] = ts; });
     myMap = {};
+    persistDeleted();
     saveMine();
     render();
     toast('已清空我的番剧');
+  });
+
+  // ---- 云同步：GitHub Gist（Token 仅保存在本机） ----
+  var syncCfg = {};
+  var syncBusy = false;
+  var syncTimer = null;
+
+  function loadSyncCfg() {
+    if (!canStore) return {};
+    try {
+      var parsed = JSON.parse(localStorage.getItem(GIST_KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveSyncCfg(cfg) {
+    syncCfg = cfg || {};
+    if (!canStore) return;
+    try {
+      localStorage.setItem(GIST_KEY, JSON.stringify(syncCfg));
+    } catch (e) { /* 忽略存储失败 */ }
+  }
+
+  function setSyncStatus(text, tone) {
+    var el = $('syncStatus');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'sync-status' + (tone ? ' ' + tone : '');
+  }
+
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    var hh = String(d.getHours());
+    var mm = String(d.getMinutes());
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
+      (hh.length < 2 ? '0' + hh : hh) + ':' + (mm.length < 2 ? '0' + mm : mm);
+  }
+
+  function openSync() {
+    var cfg = loadSyncCfg();
+    syncCfg = cfg;
+    $('gistToken').value = cfg.token || '';
+    $('gistId').value = cfg.gistId || '';
+    if (cfg.lastSync) setSyncStatus('上次同步 ' + fmtTime(cfg.lastSync), 'ok');
+    else setSyncStatus(cfg.token ? '尚未同步' : '未配置', '');
+    $('syncModal').hidden = false;
+    setTimeout(function () { $('gistToken').focus(); }, 0);
+  }
+
+  function closeSync() {
+    $('syncModal').hidden = true;
+    var btn = $('syncBtn');
+    if (btn) btn.focus();
+  }
+
+  function parsePayload(text) {
+    try {
+      var p = JSON.parse(String(text || '{}'));
+      return p && typeof p === 'object' ? p : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function gistRequest(cfg, method, path, body) {
+    var headers = {
+      Authorization: 'Bearer ' + cfg.token,
+      Accept: 'application/vnd.github+json'
+    };
+    var opts = { method: method, headers: headers };
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    return fetch('https://api.github.com' + path, opts).then(function (res) {
+      if (res.status === 401) throw new Error('Token 无效或已过期');
+      if (res.status === 403) throw new Error('权限不足，Token 需包含 gist 权限');
+      if (res.status === 404) {
+        var miss = new Error('未找到该 Gist');
+        miss.code = 404;
+        throw miss;
+      }
+      if (!res.ok) throw new Error('GitHub 返回 ' + res.status);
+      return res.json();
+    });
+  }
+
+  function gistPull(cfg) {
+    if (!cfg.gistId) return Promise.resolve(null);
+    return gistRequest(cfg, 'GET', '/gists/' + encodeURIComponent(cfg.gistId)).then(function (g) {
+      var file = g.files && g.files[GIST_FILE];
+      if (!file) return null;
+      if (file.truncated && file.raw_url) {
+        return fetch(file.raw_url, { headers: { Authorization: 'Bearer ' + cfg.token } })
+          .then(function (r) {
+            if (!r.ok) throw new Error('读取 Gist 内容失败');
+            return r.text();
+          })
+          .then(parsePayload);
+      }
+      return parsePayload(file.content);
+    }).catch(function (err) {
+      // Gist 被删掉时重新创建，不阻断同步
+      if (err && err.code === 404) {
+        cfg.gistId = '';
+        saveSyncCfg(cfg);
+        return null;
+      }
+      throw err;
+    });
+  }
+
+  function gistPush(cfg, payload) {
+    var body = {
+      description: '番剧库 · 我的追番（私有同步）',
+      files: {}
+    };
+    body.files[GIST_FILE] = { content: JSON.stringify(payload, null, 2) };
+    var req;
+    if (cfg.gistId) {
+      req = gistRequest(cfg, 'PATCH', '/gists/' + encodeURIComponent(cfg.gistId), body)
+        .catch(function (err) {
+          if (err && err.code === 404) {
+            cfg.gistId = '';
+            return gistRequest(cfg, 'POST', '/gists', body);
+          }
+          throw err;
+        });
+    } else {
+      req = gistRequest(cfg, 'POST', '/gists', body);
+    }
+    return req.then(function (g) {
+      cfg.gistId = g.id;
+      saveSyncCfg(cfg);
+      return g;
+    });
+  }
+
+  function buildPayload() {
+    return {
+      app: 'yuc-anime-list',
+      version: 3,
+      updatedAt: new Date().toISOString(),
+      items: Object.keys(myMap).map(function (id) {
+        var e = myMap[id];
+        return {
+          id: Number(id),
+          status: e.s,
+          addedAt: e.t || 0,
+          ep: e.ep || 0,
+          updatedAt: e.u || e.t || 0
+        };
+      }),
+      deleted: myDeleted
+    };
+  }
+
+  // 双向合并：条目按最后更新时间取状态，进度取较大值；删除用墓碑同步
+  function mergeRemote(remote) {
+    if (!remote) return 0;
+    var changed = 0;
+    var remoteDeleted = remote.deleted && typeof remote.deleted === 'object' ? remote.deleted : {};
+    var items = Array.isArray(remote.items) ? remote.items : [];
+    items.forEach(function (it) {
+      if (!it || it.id == null) return;
+      var id = String(it.id);
+      if (!byId.has(id)) return;
+      var r = {
+        s: STATUS[it.status] ? it.status : 'done',
+        t: Number(it.addedAt) || 0,
+        ep: Math.max(0, Math.round(Number(it.ep) || 0)),
+        u: Number(it.updatedAt) || Number(it.addedAt) || 0
+      };
+      var tomb = Number(remoteDeleted[id]) || Number(myDeleted[id]) || 0;
+      if (tomb && tomb >= r.u) return;
+      var l = myMap[id];
+      if (!l) {
+        myMap[id] = r;
+        delete myDeleted[id];
+        changed += 1;
+        return;
+      }
+      var lU = Number(l.u) || Number(l.t) || 0;
+      var newer = r.u > lU ? r : l;
+      var ep = Math.max(Number(l.ep) || 0, r.ep);
+      var total = Number((byId.get(id) || {}).e) || 0;
+      var status = newer.s;
+      if (total > 0 && ep >= total) status = 'done';
+      var next = {
+        s: status,
+        t: Math.min(Number(l.t) || Infinity, r.t || Infinity) || Date.now(),
+        ep: ep,
+        u: Math.max(lU, r.u)
+      };
+      if (JSON.stringify(next) !== JSON.stringify(l)) changed += 1;
+      myMap[id] = next;
+    });
+    Object.keys(remoteDeleted).forEach(function (id) {
+      if (!byId.has(id)) return;
+      var ts = Number(remoteDeleted[id]) || 0;
+      var maxTs = Math.max(ts, Number(myDeleted[id]) || 0);
+      if (!maxTs) return;
+      var l = myMap[id];
+      // 本地在删除之后又更新过，则以本地为准
+      if (l && (Number(l.u) || Number(l.t) || 0) > maxTs) return;
+      if (l) { delete myMap[id]; changed += 1; }
+      myDeleted[id] = maxTs;
+    });
+    persistDeleted();
+    return changed;
+  }
+
+  function syncNow(silent) {
+    var cfg = loadSyncCfg();
+    syncCfg = cfg;
+    if (!cfg.token) {
+      if (!silent) {
+        setSyncStatus('请先填写访问令牌', 'err');
+        openSync();
+      }
+      return Promise.resolve(false);
+    }
+    if (syncBusy) return Promise.resolve(false);
+    syncBusy = true;
+    setSyncStatus('同步中…', '');
+    return gistPull(cfg).then(function (remote) {
+      var changed = mergeRemote(remote);
+      if (changed) {
+        saveMine({ fromSync: true });
+        render();
+      }
+      return gistPush(cfg, buildPayload());
+    }).then(function () {
+      cfg.lastSync = Date.now();
+      saveSyncCfg(cfg);
+      markBackup();
+      setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
+      if (!silent) toast('云同步完成');
+      return true;
+    }).catch(function (err) {
+      var msg = err && err.message ? err.message : '同步失败';
+      setSyncStatus(msg, 'err');
+      if (!silent) toast('同步失败：' + msg);
+      return false;
+    }).then(function (ok) {
+      syncBusy = false;
+      return ok;
+    });
+  }
+
+  function scheduleSync() {
+    if (!syncCfg || !syncCfg.token || !syncCfg.gistId) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { syncNow(true); }, 2500);
+  }
+
+  $('syncBtn').addEventListener('click', openSync);
+  $('syncMask').addEventListener('click', closeSync);
+  $('syncNowBtn').addEventListener('click', function () {
+    var token = $('gistToken').value.trim();
+    var gistId = $('gistId').value.trim();
+    if (!token) {
+      setSyncStatus('请先填写访问令牌', 'err');
+      $('gistToken').focus();
+      return;
+    }
+    var cfg = loadSyncCfg();
+    cfg.token = token;
+    cfg.gistId = gistId;
+    saveSyncCfg(cfg);
+    syncNow(false);
+  });
+  $('syncDisconnectBtn').addEventListener('click', function () {
+    if (!confirm('断开云同步？已保存的 Gist 不会被删除。')) return;
+    try { localStorage.removeItem(GIST_KEY); } catch (e) { /* 忽略 */ }
+    syncCfg = {};
+    $('gistToken').value = '';
+    $('gistId').value = '';
+    setSyncStatus('已断开', '');
+    toast('已断开云同步');
   });
 
   // 用户手动修改 hash（前进/后退或粘贴链接）时同步界面
@@ -4143,6 +4586,11 @@
     : '数据未就绪';
   if (!canStore) {
     $('storageWarn').hidden = false;
+  }
+  // 已配置云同步时，启动后自动与 Gist 合并一次
+  syncCfg = loadSyncCfg();
+  if (syncCfg.token && syncCfg.gistId) {
+    setTimeout(function () { syncNow(true); }, 1200);
   }
 })();
 </script>

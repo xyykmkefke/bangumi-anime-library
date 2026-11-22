@@ -2226,8 +2226,150 @@ async function main() {
     } catch {}
     check('详情类型与地区标签可跳转筛选', chipJumpOk, chipJumpInfo);
 
+    // 累计改动后应主动提示备份
+    const dirtyHint = await cdp.evaluate(`(async () => {
+      const key = 'yuc_my_anime_v1';
+      const map = JSON.parse(localStorage.getItem(key) || '{}');
+      if (!Object.keys(map).length) {
+        document.querySelectorAll('.tab')[0].click();
+        await new Promise((r) => setTimeout(r, 300));
+        const card = [...document.querySelectorAll('#grid .card')]
+          .find((c) => !c.classList.contains('picked'));
+        if (card) {
+          card.querySelector('[data-act="toggle"]').click();
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+      localStorage.setItem('yuc_backup_v1', String(Date.now() - 86400000));
+      localStorage.setItem('yuc_dirty_v1', '5');
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 350));
+      const el = document.getElementById('backupHint');
+      return [!el.hidden, el.textContent].join('|');
+    })()`);
+    check('累计改动后提示备份', /^true\|有 \d+ 处改动待备份$/.test(dirtyHint), dirtyHint);
+
+    // Token 无效时应给出明确错误，而不是静默失败
+    const syncErr = await cdp.evaluate(`(async () => {
+      const real = window.fetch;
+      window.fetch = function (url) {
+        if (String(url).indexOf('api.github.com') >= 0) {
+          return Promise.resolve(new Response('{}', { status: 401 }));
+        }
+        return real.apply(this, arguments);
+      };
+      document.getElementById('syncBtn').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const opened = !document.getElementById('syncModal').hidden;
+      document.getElementById('gistToken').value = 'bad-token';
+      document.getElementById('gistId').value = 'gist-mock';
+      document.getElementById('syncNowBtn').click();
+      await new Promise((r) => setTimeout(r, 800));
+      const status = document.getElementById('syncStatus').textContent;
+      window.fetch = real;
+      document.getElementById('syncMask').click();
+      localStorage.removeItem('yuc_gist_v1');
+      return [opened, status].join('|');
+    })()`);
+    check('云同步 Token 无效时给出提示', syncErr === 'true|Token 无效或已过期', syncErr);
+
+    // 云同步：远端新增、远端状态更新、远端删除三类情况都要正确合并并回写
+    const mockScript = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const real = window.fetch.bind(window);
+        window.__syncCalls = [];
+        window.fetch = function (url, opts) {
+          if (String(url).indexOf('api.github.com') < 0) return real.apply(this, arguments);
+          const method = (opts && opts.method) || 'GET';
+          window.__syncCalls.push({ method, body: opts && opts.body });
+          const now = Date.now();
+          if (method === 'GET') {
+            const ids = (window.ANIME_DATA || []).map((x) => String(x.i));
+            window.__syncRemoteIds = { fresh: ids[0], updated: ids[1], removed: ids[2] };
+            return Promise.resolve(new Response(JSON.stringify({
+              id: 'gist-mock',
+              files: { 'yuc-anime-list.json': { content: JSON.stringify({
+                app: 'yuc-anime-list',
+                version: 3,
+                updatedAt: new Date().toISOString(),
+                items: [
+                  { id: Number(ids[0]), status: 'done', addedAt: 1, ep: 12, updatedAt: now },
+                  { id: Number(ids[1]), status: 'drop', addedAt: 1, ep: 0, updatedAt: now },
+                ],
+                deleted: { [ids[2]]: now },
+              }) } },
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+          return Promise.resolve(new Response(JSON.stringify({ id: 'gist-mock' }), {
+            status: 200, headers: { 'Content-Type': 'application/json' },
+          }));
+        };
+      })();`,
+    });
+
+    await cdp.evaluate(`(() => {
+      const ids = (window.ANIME_DATA || []).map((x) => String(x.i));
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [ids[1]]: { s: 'want', t: 1, ep: 0, u: 1 },
+        [ids[2]]: { s: 'want', t: 1, ep: 0, u: 1 },
+      }));
+      localStorage.setItem('yuc_deleted_v1', '{}');
+      localStorage.setItem('yuc_dirty_v1', '0');
+      localStorage.setItem('yuc_gist_v1', JSON.stringify({
+        token: 'ghp_mock', gistId: 'gist-mock', lastSync: 0,
+      }));
+    })()`);
+    await cdp.send('Page.reload');
+
+    let syncMerge = '';
+    for (let i = 0; i < 48; i += 1) {
+      try {
+        syncMerge = await cdp.evaluate(`(() => {
+          const map = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+          const ids = window.__syncRemoteIds || {};
+          const calls = window.__syncCalls || [];
+          const patch = calls.filter((c) => c.method === 'PATCH').pop();
+          let pushed = null;
+          try {
+            pushed = JSON.parse(JSON.parse(patch.body).files['yuc-anime-list.json'].content);
+          } catch (e) {}
+          return JSON.stringify({
+            hasFresh: !!map[ids.fresh],
+            freshStatus: map[ids.fresh] && map[ids.fresh].s,
+            freshEp: map[ids.fresh] && map[ids.fresh].ep,
+            updatedStatus: map[ids.updated] && map[ids.updated].s,
+            hasRemoved: !!map[ids.removed],
+            pushedIds: pushed ? pushed.items.map((x) => String(x.id)) : null,
+            pushedDeleted: pushed ? Object.keys(pushed.deleted || {}) : null,
+          });
+        })()`);
+        const state = JSON.parse(syncMerge);
+        if (state.freshStatus && state.pushedIds) break;
+      } catch {}
+      await sleep(250);
+    }
+    let mergeState = {};
+    try { mergeState = JSON.parse(syncMerge); } catch {}
+    check(
+      '云同步合并远端新增、更新与删除',
+      mergeState.hasFresh === true && mergeState.freshStatus === 'done' &&
+        mergeState.freshEp === 12 && mergeState.updatedStatus === 'drop' &&
+        mergeState.hasRemoved === false,
+      syncMerge,
+    );
+    check(
+      '云同步把合并结果回写 Gist',
+      Array.isArray(mergeState.pushedIds) && mergeState.pushedIds.length === 2 &&
+        Array.isArray(mergeState.pushedDeleted) && mergeState.pushedDeleted.length === 1,
+      syncMerge,
+    );
+
+    await cdp.send('Page.removeScriptToEvaluateOnNewDocument', {
+      identifier: mockScript.result.identifier,
+    });
+
     // 清空测试数据，避免污染用户清单
-    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1');");
+    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");
   } finally {
     try { ws?.close(); } catch {}
     if (child) {
