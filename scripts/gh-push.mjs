@@ -26,9 +26,15 @@ function ghJson(args, input) {
   return JSON.parse(gh(args, input));
 }
 
-const files = execFileSync('git', ['diff', '--name-only', 'HEAD~1', 'HEAD'], {
+// 用 name-status 区分新增/修改/删除：删除的文件不能 readFileSync，
+// 在 Git tree API 中以 sha: null 表示从远端移除。
+const rawFiles = execFileSync('git', ['diff', '--name-status', 'HEAD~1', 'HEAD'], {
   cwd: ROOT, encoding: 'utf8',
 }).trim().split(/\r?\n/).filter(Boolean);
+const files = rawFiles.map((line) => {
+  const [status, ...rest] = line.split('\t');
+  return { status, path: rest.join('\t') };
+});
 
 const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
 const subject = execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -37,14 +43,20 @@ const authorName = execFileSync('git', ['config', 'user.name'], { cwd: ROOT, enc
 const authorEmail = execFileSync('git', ['config', 'user.email'], { cwd: ROOT, encoding: 'utf8' }).trim();
 
 console.log('仓库根目录:', ROOT);
-console.log('待同步文件:', files.join(', '));
+console.log('待同步文件:', files.map((f) => `${f.status} ${f.path}`).join(', '));
 const ref = ghJson([`repos/${REPO}/git/ref/heads/main`]);
 const baseCommit = ref.object.sha;
 const base = ghJson([`repos/${REPO}/git/commits/${baseCommit}`]);
 console.log('远端基线:', baseCommit.slice(0, 7), '本地提交:', headSha.slice(0, 7));
 
 const tree = [];
-for (const rel of files) {
+for (const { status, path: rel } of files) {
+  if (status === 'D') {
+    // Git tree API：sha=null 表示删除该路径
+    tree.push({ path: rel, mode: '100644', type: 'blob', sha: null });
+    console.log('delete', rel);
+    continue;
+  }
   const content = readFileSync(path.join(ROOT, rel));
   const blob = ghJson([`--method`, 'POST', `repos/${REPO}/git/blobs`], {
     content: content.toString('base64'),
