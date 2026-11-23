@@ -14,12 +14,18 @@ const PORT = 8788;
 const CDP_PORT = 9334;
 const KEEP = process.argv.includes('--keep');
 
+// 浏览器候选：优先级 CHROME_PATH 环境变量 > Windows Edge/Chrome > Linux Chrome/Chromium
+// CI（ubuntu-latest）通过 CHROME_PATH 指向 actions/setup-chrome 安装的浏览器
 const EDGE_CANDIDATES = [
+  process.env.CHROME_PATH,
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-];
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+].filter(Boolean);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -141,6 +147,7 @@ async function main() {
         '--disable-gpu',
         '--hide-scrollbars',
         '--no-first-run',
+        ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
         `--remote-debugging-port=${CDP_PORT}`,
         `--user-data-dir=${profile}`,
         '--window-size=1440,1100',

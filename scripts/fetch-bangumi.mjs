@@ -8,7 +8,11 @@ import { buildLite } from './build-lite.mjs';
 import { initials } from './build-pinyin.mjs';
 import { genreIdsFromNames, rawTagNames } from './genres.mjs';
 
-const BASE = 'https://bgmapi.anibt.net';
+// 抓取源：默认第三方镜像。若该镜像失效，可通过 BGM_API_BASE 环境变量指向
+// 兼容同样 /v0/search/subjects 协议的替代镜像，无需改代码：
+//   BGM_API_BASE=https://<备用镜像> npm run fetch-data
+// 注意：api.bgm.tv 官方接口协议/限流不同，不能直接用；切换前先确认返回结构兼容。
+const BASE = (process.env.BGM_API_BASE || 'https://bgmapi.anibt.net').replace(/\/+$/, '');
 const START_YEAR = 1990;
 const END_YEAR = 2026;
 const PAGE_SIZE = 20;
@@ -131,9 +135,57 @@ async function crawlQuarter(quarter) {
   return items.length;
 }
 
+// 启动前连通性预检：避免源失效时逐季度重试 148 次才失败。
+// 行为：源不可达时，若季度缓存完整则自动离线重建；否则明确失败并给出指引。
+async function probeSource(quarters) {
+  const url = `${BASE}/v0/search/subjects?limit=1&offset=0`;
+  const payload = {
+    keyword: '',
+    sort: 'heat',
+    filter: { type: [2], air_date: ['>=2026-01-01', '<2026-04-01'] },
+  };
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data.data)) throw new Error('返回结构缺少 data 数组，镜像协议不兼容');
+    console.log(`抓取源可用：${BASE}`);
+    return;
+  } catch (err) {
+    console.warn(`抓取源不可达：${BASE}（${err.message}）`);
+  }
+
+  // 源不可达：检查季度缓存是否齐全
+  const missing = [];
+  for (const q of quarters) {
+    if (!(await exists(path.join(buildDir, `${q.key}.json`)))) missing.push(q.key);
+  }
+  if (missing.length === 0 && !REFRESH) {
+    console.warn(`季度缓存完整（${quarters.length}/${quarters.length}），转为离线重建，不联网。`);
+    return;
+  }
+  console.error('无法继续：');
+  if (REFRESH) {
+    console.error('  - 当前为 --refresh 模式，强制刷新必须联网（已有缓存也不能替代）');
+  } else {
+    console.error(`  - 缺失季度缓存 ${missing.length} 个：${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ' …' : ''}`);
+  }
+  console.error('处理方式：');
+  console.error('  1. 设置 BGM_API_BASE 指向兼容 /v0/search/subjects 协议的备用镜像后重试');
+  console.error('  2. 或去掉 --refresh，用现有季度缓存离线重建');
+  console.error('  3. 注意：api.bgm.tv 官方接口协议不同，不可直接作为备用源');
+  throw new Error('抓取源不可达且季度缓存不完整');
+}
+
 async function main() {
   await mkdir(buildDir, { recursive: true });
   const quarters = buildQuarters();
+  await probeSource(quarters);
   const seen = new Set();
   const all = [];
   let fetched = 0;

@@ -1,6 +1,6 @@
 {
   "name": "bangumi-anime-library",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "private": true,
   "description": "本地优先的番剧浏览与追番清单，内置 Bangumi 1990–2026 季度数据",
   "license": "MIT",
@@ -11,7 +11,8 @@
     "check-data": "node scripts/check-data.mjs",
     "build-lite": "node scripts/build-lite.mjs",
     "build-pinyin": "node scripts/build-pinyin.mjs",
-    "fetch-data": "node scripts/fetch-bangumi.mjs"
+    "fetch-data": "node scripts/fetch-bangumi.mjs",
+    "gh-push": "node scripts/gh-push.mjs"
   },
   "keywords": [
     "anime",
