@@ -1405,6 +1405,62 @@ async function main() {
       contrastInfo,
     );
 
+    // 对比度修复回归：白字元素压深靛蓝底、无封面占位字提亮、激活计数去透明（明暗两主题色值固定）
+    const pinInfo = await cdp.evaluate(`(async () => {
+      const collect = () => {
+        const cs = (el, pseudo) => getComputedStyle(el, pseudo || null);
+        const bm = document.querySelector('.brand-mark');
+        const bp = document.querySelector('.btn.primary');
+        const ph = document.querySelector('.cover .ph');
+        const probe = document.createElement('div');
+        probe.className = 'cover noimg';
+        probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:10px;height:10px;visibility:hidden';
+        document.body.appendChild(probe);
+        const afterColor = cs(probe, '::after').color;
+        probe.remove();
+        const dcv = document.getElementById('detailCover');
+        let pill = document.querySelector('#statusRow .pill.active .n');
+        if (!pill) {
+          let host = document.querySelector('#statusRow .pill');
+          if (!host) {
+            host = document.createElement('button');
+            host.className = 'pill';
+            host.innerHTML = '<span class="n"></span>';
+            document.getElementById('statusRow').appendChild(host);
+          }
+          host.classList.add('active');
+          pill = host.querySelector('.n');
+        }
+        return [
+          cs(bm).backgroundColor,
+          cs(bm).color,
+          bp ? cs(bp).backgroundColor : '',
+          ph ? cs(ph).color : '',
+          afterColor,
+          cs(dcv).color,
+          pill ? cs(pill).color : '',
+          pill ? cs(pill).opacity : '',
+          document.documentElement.getAttribute('data-theme'),
+        ].join('|');
+      };
+      if (document.documentElement.getAttribute('data-theme') !== 'dark') {
+        document.getElementById('themeBtn').click();
+      }
+      const dark = collect();
+      document.getElementById('themeBtn').click();
+      const light = collect();
+      document.getElementById('themeBtn').click();
+      return [dark, light].join('#');
+    })()`);
+    check(
+      '对比度修复四项色值固定（明暗）',
+      pinInfo === [
+        'rgb(82, 94, 201)|rgb(255, 255, 255)|rgb(82, 94, 201)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(185, 192, 255)|1|dark',
+        'rgb(71, 81, 196)|rgb(255, 255, 255)|rgb(71, 81, 196)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(58, 68, 173)|1|light',
+      ].join('#'),
+      pinInfo,
+    );
+
     // 系统主题：清掉偏好与 hash 后，模拟系统浅色，初始主题应跟随
     await cdp.evaluate(
       "localStorage.removeItem('yuc_prefs_v1'); history.replaceState(null, '', location.pathname); true",
