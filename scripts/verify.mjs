@@ -1965,6 +1965,20 @@ async function main() {
     })()`);
     check('命令面板可打开、搜索并关闭', paletteInfo === 'true|true|true|true|true', paletteInfo);
 
+    // 命令面板关闭后焦点归还触发元素
+    const paletteFocus = await cdp.evaluate(`(async () => {
+      const btn = document.getElementById('themeBtn');
+      btn.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const inPalette = document.activeElement === document.getElementById('paletteInput');
+      document.getElementById('paletteInput').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      return [inPalette, document.activeElement === btn,
+        document.getElementById('palette').hidden].join('|');
+    })()`);
+    check('命令面板关闭后焦点归还触发元素', paletteFocus === 'true|true|true', paletteFocus);
+
     // 保存筛选视图
     const viewInfo = await cdp.evaluate(`(async () => {
       localStorage.removeItem('yuc_views_v1');
@@ -2136,6 +2150,28 @@ async function main() {
       advFilter === 'true|true|true|true|true',
       advFilter,
     );
+
+    // 抽屉 Tab 圈闭 + 关闭后焦点归还筛选按钮
+    const sheetFocus = await cdp.evaluate(`(async () => {
+      const sheet = document.getElementById('filterSheet');
+      const toggle = document.getElementById('filterToggle');
+      const focusables = [...sheet.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+        .filter((x) => !x.disabled && x.offsetParent !== null);
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) return 'no-focusables';
+      last.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 80));
+      const trapped = document.activeElement === first;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 120));
+      return [trapped, sheet.hidden, document.activeElement === toggle].join('|');
+    })()`);
+    check('筛选抽屉 Tab 圈闭且关闭后焦点归位', sheetFocus === 'true|true|true', sheetFocus);
+    // 重新打开抽屉，恢复后续用例的环境
+    await cdp.evaluate("document.getElementById('filterToggle').click(); true");
+    await sleep(150);
 
     // 移动端紧凑头部：搜索默认收起，可点图标展开；主要控件达到 44px
     const mobileChrome = await cdp.evaluate(`(async () => {

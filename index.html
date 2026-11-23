@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.13">
+<meta name="version" content="1.6.14">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2500,7 +2500,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.13</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.14</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3963,6 +3963,45 @@
       '<button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
   }
 
+  // 平铺网格的增量同步：按 data-id 与 outerHTML 逐卡对比，内容未变的节点原样保留
+  // （封面不重载、图片不重解码），仅替换内容变化的节点并保持顺序；全部一致时零 DOM 操作。
+  function syncCards(html) {
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    var next = [].slice.call(tmp.children);
+    var cur = [].slice.call(gridEl.children);
+    if (cur.length === next.length) {
+      var same = true;
+      for (var i = 0; i < next.length; i += 1) {
+        if (cur[i].outerHTML !== next[i].outerHTML) { same = false; break; }
+      }
+      if (same) return;
+    }
+    var curById = {};
+    for (var ci = 0; ci < cur.length; ci += 1) {
+      var cid = cur[ci].getAttribute('data-id');
+      if (cid) curById[cid] = cur[ci];
+    }
+    var frag = document.createDocumentFragment();
+    for (var ni = 0; ni < next.length; ni += 1) {
+      var node = next[ni];
+      var nid = node.getAttribute('data-id');
+      var exist = nid ? curById[nid] : null;
+      if (exist && exist.outerHTML === node.outerHTML) {
+        frag.appendChild(exist);
+        curById[nid] = null;
+      } else if (exist) {
+        if (exist.parentNode) exist.parentNode.removeChild(exist);
+        frag.appendChild(node);
+        curById[nid] = null;
+      } else {
+        frag.appendChild(node);
+      }
+    }
+    gridEl.innerHTML = '';
+    gridEl.appendChild(frag);
+  }
+
   function render() {
     // 状态筛选只在「我的番剧」或搜索时生效，其他场景静默清掉，避免出现无效条件
     if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
@@ -4033,13 +4072,16 @@
     var grouped = state.tab === 'mine' && state.group && !board;
     // 看板与分组一次展示全部；网格、列表、日历按批渲染
     var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
-    gridEl.innerHTML = board
-      ? boardHtml(list)
-      : grouped
-        ? (state.groupBy === 'status' ? statusGroupsHtml(shown) : timelineHtml(shown))
-        : calendar
-          ? calendarHtml(shown)
-          : shown.map(cardHtml).join('');
+    if (board) {
+      gridEl.innerHTML = boardHtml(list);
+    } else if (grouped) {
+      gridEl.innerHTML = state.groupBy === 'status' ? statusGroupsHtml(shown) : timelineHtml(shown);
+    } else if (calendar) {
+      gridEl.innerHTML = calendarHtml(shown);
+    } else {
+      // 平铺网格/列表：按 data-id 增量同步，未变化的卡片保留原 DOM（封面不重载、动画不重启）
+      syncCards(shown.map(cardHtml).join(''));
+    }
     gridEl.setAttribute('aria-busy', 'false');
     // 只让第一张卡片进入 Tab 序列，其余用方向键移动，避免逐卡 Tab 数百次
     var cardLinks = gridEl.querySelectorAll('.card-link');
@@ -4470,6 +4512,9 @@
   function closeFilterSheet() {
     var sheet = $('filterSheet');
     if (!sheet || sheet.hidden) return;
+    // 焦点还在抽屉内时归还到筛选按钮，避免关闭后焦点丢失
+    var ae = document.activeElement;
+    if (ae && sheet.contains(ae)) $('filterToggle').focus();
     $('filters').classList.remove('in-sheet');
     $('filtersSlot').appendChild($('filters'));
     sheet.hidden = true;
@@ -4667,6 +4712,7 @@
   var paletteListEl = $('paletteList');
   var paletteItems = [];
   var paletteIndex = 0;
+  var paletteOpener = null;
 
   function paletteCommands() {
     return [
@@ -4767,6 +4813,7 @@
   }
 
   function openPalette() {
+    paletteOpener = document.activeElement;
     paletteEl.hidden = false;
     paletteInput.value = '';
     paletteIndex = 0;
@@ -4775,7 +4822,16 @@
   }
 
   function closePalette() {
+    if (paletteEl.hidden) return;
     paletteEl.hidden = true;
+    // 关闭后把焦点归还触发元素，避免键盘用户焦点掉到 body
+    // （隐藏焦点元素后浏览器把焦点移回 body 是异步的，需同时覆盖"仍在面板内"的情况）
+    if (paletteOpener && typeof paletteOpener.focus === 'function' &&
+      (!document.activeElement || document.activeElement === document.body ||
+        paletteEl.contains(document.activeElement))) {
+      paletteOpener.focus();
+    }
+    paletteOpener = null;
   }
 
   paletteInput.addEventListener('input', function () {
@@ -5505,6 +5561,9 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         closeFilterSheet();
+      } else if (e.key === 'Tab') {
+        // 抽屉声明了 aria-modal，Tab 必须圈在抽屉内，避免跑进背景列表
+        trapModalTab($('filterSheet'), e);
       }
       return;
     }
@@ -6230,9 +6289,10 @@
       });
   }
 
-  // 首屏之后补齐完整数据：优先走 jsDelivr（比 Pages 快数倍），失败再回退本站
+  // 首屏之后补齐完整数据：两个 jsDelivr CDN 并行竞速（先到先用），全部失败再回退本站
   var fullState = fullReady ? 'ready' : 'idle';
-  var fullTry = 0;
+  var FULL_CDN_TIMEOUT = 6000;
+  var FULL_ORIGIN_TIMEOUT = 10000;
 
   function fullDataSources() {
     // 本地开发/验收直接读本站，避免依赖外网
@@ -6272,55 +6332,89 @@
     }
   }
 
-  function tryFullSource() {
+  function fullFailed() {
     if (fullReady) return;
-    var list = fullDataSources();
-    if (fullTry >= list.length) {
-      fullState = 'failed';
-      updateDataHint();
-      render();
-      $('loadBar').hidden = true;
-      return;
-    }
+    fullState = 'failed';
+    updateDataHint();
+    render();
+    $('loadBar').hidden = true;
+  }
+
+  // 同源兜底：内容与本站一致，仅在两个 CDN 全部失败/超时后使用
+  function tryOriginSource() {
+    if (fullReady) return;
     var s = document.createElement('script');
     var done = false;
     var timer = setTimeout(function () {
       if (done || fullReady) return;
       done = true;
-      fullTry += 1;
-      tryFullSource();
-    }, 10000);
+      fullFailed();
+    }, FULL_ORIGIN_TIMEOUT);
     s.async = true;
-    s.src = list[fullTry];
+    s.src = 'data/anime-data.js';
     s.onload = function () {
       clearTimeout(timer);
-      if (!fullReady && (window.ANIME_DATA || []).length > DATA.length) {
-        applyFullData();
-        return;
-      }
+      if (fullReady) return;
+      if ((window.ANIME_DATA || []).length > DATA.length) { applyFullData(); return; }
       if (done) return;
       done = true;
-      fullTry += 1;
-      tryFullSource();
+      fullFailed();
     };
     s.onerror = function () {
       clearTimeout(timer);
       if (done || fullReady) return;
       done = true;
-      fullTry += 1;
-      tryFullSource();
+      fullFailed();
     };
     document.head.appendChild(s);
+  }
+
+  // 并行竞速：两个 CDN 同时发起，先成功者立即应用，未完成者被移除；
+  // 全部失败或超时后回退同源。最坏耗时从串行 3×10s 缩短为 CDN 6s + 同源 10s。
+  function raceFullSources() {
+    var list = fullDataSources();
+    var cdn = list.filter(function (u) { return /^https:/.test(u); });
+    if (!cdn.length) { tryOriginSource(); return; }
+    var pending = cdn.length;
+    cdn.forEach(function (src) {
+      var s = document.createElement('script');
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled || fullReady) return;
+        settled = true;
+        s.onload = s.onerror = null;
+        if (s.parentNode) s.parentNode.removeChild(s);
+        pending -= 1;
+        if (!pending) tryOriginSource();
+      }, FULL_CDN_TIMEOUT);
+      s.async = true;
+      s.src = src;
+      s.onload = function () {
+        if (settled || fullReady) return;
+        settled = true;
+        clearTimeout(timer);
+        if ((window.ANIME_DATA || []).length > DATA.length) { applyFullData(); return; }
+        pending -= 1;
+        if (!pending) tryOriginSource();
+      };
+      s.onerror = function () {
+        if (settled || fullReady) return;
+        settled = true;
+        clearTimeout(timer);
+        pending -= 1;
+        if (!pending) tryOriginSource();
+      };
+      document.head.appendChild(s);
+    });
   }
 
   function loadFullData() {
     if (fullReady) { window.__FULL_DATA_READY = true; return; }
     if (fullState === 'loading') return;
     fullState = 'loading';
-    fullTry = 0;
     $('loadBar').hidden = false;
     updateDataHint();
-    tryFullSource();
+    raceFullSources();
   }
 
   renderYears();
