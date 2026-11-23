@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.12">
+<meta name="version" content="1.6.13">
 <style>
   :root {
     --bg: #0d0f14;
@@ -390,7 +390,24 @@
     color: #ffd479;
     font-size: 12.5px;
     line-height: 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
   }
+  .offlinebar .offline-retry {
+    flex: none;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 212, 121, 0.5);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .offlinebar .offline-retry:hover { background: rgba(255, 212, 121, 0.16); }
 
   .offlinebar[hidden] { display: none; }
 
@@ -1647,6 +1664,11 @@
   html[data-theme="light"] .cardmenu-opts button.active,
   html[data-theme="light"] .hchip:hover { color: var(--accent); border-color: var(--accent); }
   html[data-theme="light"] .resultbar b { color: var(--text); }
+  /* 亮色下评分/平台/状态文字沿用暗色固定值会近乎隐形，统一改为可读的 --muted */
+  html[data-theme="light"] .score,
+  html[data-theme="light"] .score.none,
+  html[data-theme="light"] .plat,
+  html[data-theme="light"] .badge.status { color: var(--muted); }
 
   @media (max-width: 640px) {
     .btn { height: 32px; }
@@ -2351,7 +2373,7 @@
       </div>
     </div>
 
-    <div class="offlinebar" id="offlineBar" hidden>当前处于离线状态，封面与全库数据可能无法加载；已保存的追番清单仍可正常使用。</div>
+    <div class="offlinebar" id="offlineBar" hidden><span>当前处于离线状态，封面与全库数据可能无法加载；已保存的追番清单仍可正常使用。</span><button class="offline-retry" id="offlineRetry" type="button">重试加载</button></div>
 
     <div class="filters-slot" id="filtersSlot">
     <div class="filters" id="filters">
@@ -2478,12 +2500,12 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.12</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.13</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
   <div class="modal-mask"></div>
-  <div class="modal-panel detail-panel" role="dialog" aria-modal="true">
+  <div class="modal-panel detail-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="detail-cover" id="detailCover"></div>
     <div class="detail-main">
       <h2 id="modalTitle"></h2>
@@ -3396,7 +3418,9 @@
   }
 
   // 搜索相关度：0 完全一致 > 1 前缀 > 2 包含，越靠前越优先
-  function searchRank(x, q) {
+  // tokens 由调用方预计算传入：排序比较器会调用本函数约 n·log n 次，
+  // 若每次都重新 searchTokens(q) 切词，会产生上万次多余正则 split。
+  function searchRank(x, q, tokens) {
     var cn = String(x.cn || '').toLowerCase();
     var n = String(x.n || '').toLowerCase();
     var py = String(x.py || '');
@@ -3414,8 +3438,7 @@
       else if (py.indexOf(q) >= 0) best = Math.min(best, 2);
     }
     // 多关键词时整串通常不会命中，退而用首个关键词的匹配档位排序
-    var tokens = searchTokens(q).filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
-    if (best === 3 && tokens.length > 1) {
+    if (best === 3 && tokens && tokens.length > 1) {
       var head = tokens[0];
       fields.forEach(function (f) {
         if (!f) return;
@@ -3507,7 +3530,7 @@
     // 搜索结果按相关度优先，同档再按评分/热度，避免长名条目被淹没
     if (q) {
       return list.slice().sort(function (a, b) {
-        return searchRank(a, q) - searchRank(b, q) ||
+        return searchRank(a, q, tokens) - searchRank(b, q, tokens) ||
           (b.s || 0) - (a.s || 0) ||
           (b.h || 0) - (a.h || 0);
       });
@@ -4289,7 +4312,11 @@
     var entry = myMap[id];
     if (!item || !entry) return;
     var total = Number(item.e) || 0;
-    var next = Math.max(0, Math.min(total > 0 ? total : 9999, Math.round(Number(value) || 0)));
+    var cap = total > 0 ? total : 9999;
+    var raw = Math.round(Number(value) || 0);
+    var next = Math.max(0, Math.min(cap, raw));
+    // 超界输入此前会被静默截断，用户以为没生效；明确告知上限
+    if (raw > cap) toast('已限制为 ' + cap + ' 话');
     if (next === (Number(entry.ep) || 0)) return;
     entry.ep = next;
     entry.u = Date.now();
@@ -4485,6 +4512,19 @@
   window.addEventListener('offline', function () { setOffline(true); });
   window.addEventListener('online', function () { setOffline(false); });
   if (navigator.onLine === false) setOffline(true);
+  // 离线提示条内的重试：仍离线时先提示联网，已恢复则重新触发全库补齐
+  var offlineRetryBtn = $('offlineRetry');
+  if (offlineRetryBtn) {
+    offlineRetryBtn.addEventListener('click', function () {
+      if (navigator.onLine === false) {
+        toast('仍处于离线状态，请联网后重试');
+        return;
+      }
+      setOffline(false);
+      loadFullData();
+      toast('正在重新加载全库数据');
+    });
+  }
 
   // 键盘用户跳过头部，直接把焦点交给列表
   $('skipLink').addEventListener('click', function () {
@@ -4672,8 +4712,15 @@
       b.classList.toggle('active', b.dataset.tab === tab);
     });
     state.tab = tab;
-    if (tab === 'mine' && state.view === 'calendar') state.view = 'grid';
-    if (tab === 'all' && state.view === 'board') state.view = 'grid';
+    // 视图与数据集绑定：回退时给出解释，避免用户以为状态丢失
+    if (tab === 'mine' && state.view === 'calendar') {
+      state.view = 'grid';
+      toast('日历仅在我的番剧外可用，已切回网格');
+    }
+    if (tab === 'all' && state.view === 'board') {
+      state.view = 'grid';
+      toast('看板仅在我的番剧可用，已切回网格');
+    }
     state.bulk = false;
     bulkSel = Object.create(null);
     render();

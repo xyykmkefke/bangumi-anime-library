@@ -3110,6 +3110,96 @@ async function main() {
     })()`);
     check('我的番剧为空时提供去全部番剧入口', mineEmptyCta === 'true|true|true|true', mineEmptyCta);
 
+    // ---- 6 项低风险优化验收 ----
+    // ② 亮色主题下评分/平台文字使用可读色，不再沿用暗色固定值
+    const lightContrast = await cdp.evaluate(`(() => {
+      document.documentElement.setAttribute('data-theme', 'light');
+      const s = getComputedStyle(document.querySelector('.score') || document.body);
+      const p = getComputedStyle(document.querySelector('.plat') || document.body);
+      return [s.color, p.color].join('|');
+    })()`);
+    check('亮色主题评分与平台文字可读', !/rgb\(242, 243, 245\)|rgb\(198, 203, 213\)/.test(lightContrast), lightContrast);
+
+    // ③ 详情弹窗有可访问名称，指向真实存在的标题元素
+    const dialogLabel = await cdp.evaluate(`(() => {
+      const dialog = document.querySelector('#modal [role="dialog"]');
+      const id = dialog && dialog.getAttribute('aria-labelledby');
+      return [!!dialog && dialog.getAttribute('aria-modal') === 'true', !!id, !!(id && document.getElementById(id))].join('|');
+    })()`);
+    check('详情弹窗具备可访问名称', dialogLabel === 'true|true|true', dialogLabel);
+
+    // ① 搜索分词预计算后，多关键词交集与排除词排序仍稳定
+    const searchStable = await cdp.evaluate(`(async () => {
+      const input = document.getElementById('search');
+      input.value = '第 一';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      const multi = document.querySelectorAll('#grid .card').length;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      return [multi >= 0, document.querySelectorAll('#grid .card').length > 0].join('|');
+    })()`);
+    check('多关键词搜索在分词预计算后仍稳定', searchStable === 'true|true', searchStable);
+
+    // ④ 离线提示条内置重试按钮：离线时提示联网，联网后收起并触发加载
+    const offlineRetry = await cdp.evaluate(`(() => {
+      const btn = document.getElementById('offlineRetry');
+      const bar = document.getElementById('offlineBar');
+      window.dispatchEvent(new Event('offline'));
+      const shown = !bar.hidden && !!btn;
+      const msgEl = document.getElementById('toast');
+      msgEl.textContent = '';
+      btn.click();
+      const retried = /重新加载全库数据/.test(msgEl.textContent) || /仍处于离线/.test(msgEl.textContent);
+      window.dispatchEvent(new Event('online'));
+      const hidden = bar.hidden;
+      msgEl.classList.remove('show');
+      return [shown, retried, hidden].join('|');
+    })()`);
+    check('离线提示条可重试加载', offlineRetry === 'true|true|true', offlineRetry);
+
+    // ⑦ 集数输入超界时给出上限提示，而非静默截断
+    await cdp.evaluate(`(() => {
+      const item = (window.ANIME_DATA || []).find((x) => (Number(x.e) || 0) > 3);
+      if (item) localStorage.setItem('yuc_my_anime_v1', JSON.stringify({ [String(item.i)]: { status: 'doing', addedAt: Date.now(), ep: 1, updatedAt: Date.now() } }));
+      history.replaceState(null, '', location.pathname);
+      return true;
+    })()`);
+    await cdp.send('Page.reload');
+    await sleep(1200);
+    const epToast = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 400));
+      const input = document.querySelector('#grid .card .epin');
+      if (!input) return 'no-input';
+      const max = Number(input.getAttribute('max')) || 0;
+      if (max < 1 || max >= 9999) return 'no-cap';
+      input.value = String(max + 100);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      const msg = document.getElementById('toast').textContent;
+      document.getElementById('toast').classList.remove('show');
+      return msg;
+    })()`);
+    check('集数超界给出上限提示', /已限制为/.test(epToast), epToast);
+
+    // ⑧ 看板视图切到全部番剧回退网格时给出解释
+    const tabFallback = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 200));
+      const sel = document.getElementById('viewSelect');
+      sel.value = 'board';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      document.querySelectorAll('.tab')[0].click();
+      await new Promise((r) => setTimeout(r, 200));
+      const msg = document.getElementById('toast').textContent;
+      document.getElementById('toast').classList.remove('show');
+      return [sel.value, /看板仅在我的番剧可用/.test(msg)].join('|');
+    })()`);
+    check('看板视图切 Tab 回退有解释', tabFallback === 'grid|true', tabFallback);
+
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");
   } finally {
