@@ -28,7 +28,8 @@ function ghJson(args, input) {
 
 // 用 name-status 区分新增/修改/删除：删除的文件不能 readFileSync，
 // 在 Git tree API 中以 sha: null 表示从远端移除。
-const rawFiles = execFileSync('git', ['diff', '--name-status', 'HEAD~1', 'HEAD'], {
+// core.quotepath=false：避免中文文件名被转义成 "\347\225\..." 导致 readFileSync 失败
+const rawFiles = execFileSync('git', ['-c', 'core.quotepath=false', 'diff', '--name-status', 'HEAD~1', 'HEAD'], {
   cwd: ROOT, encoding: 'utf8',
 }).trim().split(/\r?\n/).filter(Boolean);
 const files = rawFiles.map((line) => {
