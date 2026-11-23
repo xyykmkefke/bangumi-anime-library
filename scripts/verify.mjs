@@ -92,21 +92,46 @@ function createCdp(ws) {
   const pending = new Map();
   const events = [];
 
+  // CDP 请求超时：CI 慢网络/页面脚本挂起时避免永久等待
+  const TIMEOUT_MS = 20000;
+  function rejectAll(reason) {
+    for (const [, entry] of pending) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error(reason));
+    }
+    pending.clear();
+  }
+  // 连接中断时把所有在途请求 reject，避免 Promise 永不 settle
+  ws.onclose = () => rejectAll('CDP 连接已关闭');
+  ws.onerror = () => rejectAll('CDP 连接出错');
+
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.id && pending.has(msg.id)) {
-      pending.get(msg.id)(msg);
+      const entry = pending.get(msg.id);
+      clearTimeout(entry.timer);
       pending.delete(msg.id);
+      entry.resolve(msg);
       return;
     }
     if (msg.method) events.push(msg);
   };
 
   const send = (method, params = {}) =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const id = ++seq;
-      pending.set(id, resolve);
-      ws.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`CDP ${method} 超时（${TIMEOUT_MS}ms）`));
+      }, TIMEOUT_MS);
+      pending.set(id, { resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ id, method, params }));
+      } catch (err) {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(err);
+      }
     });
 
   const evaluate = async (expression) => {
@@ -1310,23 +1335,29 @@ async function main() {
     })()`);
     check('跳转链接可把焦点移到番剧列表', skipInfo === 'true|true', skipInfo);
 
-    // 主题：点击切换 html[data-theme] 与背景色，并写入 hash / 偏好
+    // 主题：通过 UI 点击把状态归到确定的 dark 基线（主题切换基于内部 state.theme，
+    // 不能直接改 data-theme 属性；CI 上系统默认可能是 light），
+    // 再点击切到 light，断言主题/背景/hash/偏好/按钮文案均同步，最后切回 dark。
     const themeInfo = await cdp.evaluate(`(() => {
+      const html = document.documentElement;
       const btn = document.getElementById('themeBtn');
+      // 用点击建立 dark 基线：按钮文案 ☾ 表示当前 dark
+      if (btn.textContent !== '☾') btn.click();
       const before = getComputedStyle(document.body).backgroundColor;
+      const baseline = html.getAttribute('data-theme');
       btn.click();
-      const light = document.documentElement.getAttribute('data-theme');
+      const light = html.getAttribute('data-theme');
       const after = getComputedStyle(document.body).backgroundColor;
       const hashT = new URLSearchParams(location.hash.slice(1)).get('t');
       const prefsT = JSON.parse(localStorage.getItem('yuc_prefs_v1') || '{}').t;
       const btnText = btn.textContent;
       btn.click();
-      return [light, before !== after, hashT, prefsT, btnText,
-        document.documentElement.getAttribute('data-theme')].join('|');
+      return [baseline, light, before !== after, hashT, prefsT, btnText,
+        html.getAttribute('data-theme')].join('|');
     })()`);
     check(
       '明暗主题切换并持久化',
-      themeInfo === 'light|true|light|light|☀|dark',
+      themeInfo === 'dark|light|true|light|light|☀|dark',
       themeInfo,
     );
 
@@ -3084,7 +3115,11 @@ async function main() {
   } finally {
     try { ws?.close(); } catch {}
     if (child) {
-      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        try { child.kill('SIGTERM'); } catch {}
+      }
     }
     server.close();
     if (!KEEP) {
@@ -3100,7 +3135,23 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('验收异常：' + err.message);
-  process.exitCode = 1;
-});
+// 整体看门狗：避免 CI 上静默挂死直到 workflow 超时（默认 8 分钟，可用 VERIFY_TIMEOUT_MS 调整）
+const WATCHDOG_MS = Number(process.env.VERIFY_TIMEOUT_MS || 8 * 60 * 1000);
+const watchdog = setTimeout(() => {
+  console.error(`验收看门狗触发：超过 ${WATCHDOG_MS / 60000} 分钟未结束`);
+  console.error(`已完成 ${results.length} 项，最后一项：${results[results.length - 1]?.name || '无'}`);
+  process.exit(1);
+}, WATCHDOG_MS);
+watchdog.unref?.();
+
+main()
+  .catch((err) => {
+    console.error('验收异常：' + err.message);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    clearTimeout(watchdog);
+    // 主动退出：WebSocket / 浏览器子进程 / HTTP server 可能残留事件循环引用，
+    // 导致验收跑完后 node 进程不退出（CI 上曾挂到 workflow 超时）。
+    setImmediate(() => process.exit(process.exitCode || 0));
+  });
