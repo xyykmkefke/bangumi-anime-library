@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.16">
+<meta name="version" content="1.6.17">
 <style>
   :root {
     --bg: #0d0f14;
@@ -408,6 +408,16 @@
     cursor: pointer;
   }
   .offlinebar .offline-retry:hover { background: rgba(255, 212, 121, 0.16); }
+
+  /* 亮色主题下金句压浅底对比不足，改用深琥珀文字与同色系浅底 */
+  html[data-theme="light"] .offlinebar {
+    border-color: rgba(122, 74, 0, 0.35);
+    background: rgba(255, 196, 64, 0.16);
+    color: #6b4300;
+  }
+  html[data-theme="light"] .offlinebar .offline-retry {
+    border-color: rgba(122, 74, 0, 0.45);
+  }
 
   .offlinebar[hidden] { display: none; }
 
@@ -952,7 +962,6 @@
 
   .cover.loaded::before,
   .cover.noimg::before { opacity: 0; animation: none; }
-
   @keyframes cover-shimmer {
     from { background-position: 220% 0; }
     to { background-position: -220% 0; }
@@ -974,17 +983,6 @@
   .cover.loaded img { opacity: 1; }
 
   .card:hover .cover img { transform: scale(1.05); }
-
-  .cover.noimg::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    color: #9aa3b8;
-    font-size: 12px;
-    background: linear-gradient(160deg, #151a24, #0d1017);
-  }
 
   /* 无封面时用番名首字占位，离线或封面失效时也能快速辨认条目 */
   .cover .ph {
@@ -1668,10 +1666,7 @@
   html[data-theme="light"] .cardmenu-opts button.active,
   html[data-theme="light"] .hchip:hover { color: var(--accent); border-color: var(--accent); }
   html[data-theme="light"] .resultbar b { color: var(--text); }
-  /* 亮色下评分/平台/状态文字沿用暗色固定值会近乎隐形，统一改为可读的 --muted */
-  html[data-theme="light"] .score,
-  html[data-theme="light"] .score.none,
-  html[data-theme="light"] .plat,
+  /* 状态徽章是浅底深字；评分/平台徽章仍是深色半透明底，文字必须保持浅色 */
   html[data-theme="light"] .badge.status { color: var(--muted); }
 
   @media (max-width: 640px) {
@@ -2210,6 +2205,9 @@
   /* 封面加载中或缺失时用按条目生成的柔和色占位，避免整块死黑 */
   .cover { background: hsl(var(--phh, 220) 18% 18%); }
   html[data-theme="light"] .cover { background: hsl(var(--phh, 220) 40% 92%); }
+  /* 无封面占位用深色渐变，首字始终落在深底上；用真实背景而非伪元素，对比度审计可读到 */
+  .cover.noimg,
+  html[data-theme="light"] .cover.noimg { background: linear-gradient(160deg, #151a24, #0d1017); }
   .cover img { background: transparent; }
 
   /* 卡片工具条移到链接外后的间距 */
@@ -2504,7 +2502,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.16</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.17</span>
 </footer>
 
 <div class="modal" id="modal" hidden>

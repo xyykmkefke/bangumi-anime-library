@@ -392,6 +392,9 @@ async function main() {
           continue;
         }
         await sleep(450);
+        // 状态脚本会触发 render 并按 hash/偏好重设 data-theme；审计前强制回到目标主题
+        await cdp.evaluate(`document.documentElement.setAttribute('data-theme', '${theme}')`);
+        await sleep(80);
         let res = null;
         try {
           res = await cdp.evaluate(AUDIT_FN);
@@ -420,6 +423,13 @@ async function main() {
     }
 
     console.log('== 暗色主题 ==');
+    // 关闭过渡/动画，避免切换主题后采到中间色
+    await cdp.evaluate(`(() => {
+      const s = document.createElement('style');
+      s.id = '__contrast_static';
+      s.textContent = '*,*::before,*::after{transition:none!important;animation:none!important}';
+      document.head.appendChild(s);
+    })()`);
     await runStates('dark');
 
     // 切亮色主题（直接改属性，CSS 以 html[data-theme] 为键）

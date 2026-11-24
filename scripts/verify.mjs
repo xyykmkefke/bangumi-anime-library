@@ -1416,7 +1416,7 @@ async function main() {
         probe.className = 'cover noimg';
         probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:10px;height:10px;visibility:hidden';
         document.body.appendChild(probe);
-        const afterColor = cs(probe, '::after').color;
+        const noimgBg = cs(probe).backgroundImage;
         probe.remove();
         const dcv = document.getElementById('detailCover');
         let pill = document.querySelector('#statusRow .pill.active .n');
@@ -1436,7 +1436,7 @@ async function main() {
           cs(bm).color,
           bp ? cs(bp).backgroundColor : '',
           ph ? cs(ph).color : '',
-          afterColor,
+          noimgBg.includes('linear-gradient') ? 'gradient' : noimgBg,
           cs(dcv).color,
           pill ? cs(pill).color : '',
           pill ? cs(pill).opacity : '',
@@ -1455,8 +1455,8 @@ async function main() {
     check(
       '对比度修复四项色值固定（明暗）',
       pinInfo === [
-        'rgb(82, 94, 201)|rgb(255, 255, 255)|rgb(82, 94, 201)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(185, 192, 255)|1|dark',
-        'rgb(71, 81, 196)|rgb(255, 255, 255)|rgb(71, 81, 196)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(154, 163, 184)|rgb(58, 68, 173)|1|light',
+        'rgb(82, 94, 201)|rgb(255, 255, 255)|rgb(82, 94, 201)|rgb(154, 163, 184)|gradient|rgb(154, 163, 184)|rgb(185, 192, 255)|1|dark',
+        'rgb(71, 81, 196)|rgb(255, 255, 255)|rgb(71, 81, 196)|rgb(154, 163, 184)|gradient|rgb(154, 163, 184)|rgb(58, 68, 173)|1|light',
       ].join('#'),
       pinInfo,
     );
@@ -3203,14 +3203,41 @@ async function main() {
     check('我的番剧为空时提供去全部番剧入口', mineEmptyCta === 'true|true|true|true', mineEmptyCta);
 
     // ---- 6 项低风险优化验收 ----
-    // ② 亮色主题下评分/平台文字使用可读色，不再沿用暗色固定值
-    const lightContrast = await cdp.evaluate(`(() => {
+    // ② 亮色主题下评分/平台文字与深色徽章底的实际对比度 ≥ 4.5
+    const lightChip = await cdp.evaluate(`(() => {
       document.documentElement.setAttribute('data-theme', 'light');
-      const s = getComputedStyle(document.querySelector('.score') || document.body);
-      const p = getComputedStyle(document.querySelector('.plat') || document.body);
-      return [s.color, p.color].join('|');
+      function parse(c) {
+        const t = c.slice(c.indexOf('(') + 1, c.indexOf(')')).split(',').map(Number);
+        return [t[0], t[1], t[2], t.length > 3 ? t[3] : 1];
+      }
+      function lum(c) {
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+      }
+      function over(t, b) {
+        const a = t[3];
+        return [t[0] * a + b[0] * (1 - a), t[1] * a + b[1] * (1 - a), t[2] * a + b[2] * (1 - a), 1];
+      }
+      function ratio(a, b) {
+        const x = Math.max(a, b), y = Math.min(a, b);
+        return (x + 0.05) / (y + 0.05);
+      }
+      function worst(sel) {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        const fg = parse(cs.color);
+        const bg = parse(cs.backgroundColor);
+        let w = 99;
+        for (const base of [[0, 0, 0, 1], [255, 255, 255, 1]]) {
+          const r = ratio(lum(fg), lum(over(bg, base)));
+          if (r < w) w = r;
+        }
+        return Math.round(w * 100) / 100;
+      }
+      return [worst('.card .score'), worst('.card .plat')];
     })()`);
-    check('亮色主题评分与平台文字可读', !/rgb\(242, 243, 245\)|rgb\(198, 203, 213\)/.test(lightContrast), lightContrast);
+    check('亮色主题评分与平台文字对比度 ≥ 4.5', Array.isArray(lightChip) && lightChip.every((r) => r !== null && r >= 4.5), JSON.stringify(lightChip));
 
     // ③ 详情弹窗有可访问名称，指向真实存在的标题元素
     const dialogLabel = await cdp.evaluate(`(() => {
