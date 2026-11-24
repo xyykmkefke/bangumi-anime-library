@@ -62,7 +62,9 @@ try {
 try {
   execFileSync('git', ['merge-base', '--is-ancestor', FROM, 'HEAD'], { cwd: ROOT, stdio: 'ignore' });
 } catch {
-  fail(`--from ${FROM} 不是 HEAD 的祖先`);
+  // 经 gh API 推送后本地/远端历史会分叉，--from origin/main 通常不是 HEAD 祖先；
+  // 这里按 tree 差异同步，最终仍会用远端 tree 与本地 HEAD tree 严格比对。
+  console.log(`[gh-push] 提示：--from ${FROM} 不是 HEAD 的祖先，将按 tree 差异同步。`);
 }
 
 // 用 name-status 区分新增/修改/删除：删除的文件不能 readFileSync，
@@ -178,9 +180,18 @@ const after = ghJson([`repos/${REPO}/git/ref/heads/main`]);
 if (after.object.sha !== commit.sha) fail(`远端 main 更新后校验失败：${after.object.sha} != ${commit.sha}`);
 console.log('tree 校验一致:', localTree);
 
-// 同步本地跟踪引用，doctor 才能看到“内容已对齐”
-execFileSync('git', ['update-ref', 'refs/remotes/origin/main', commit.sha], { cwd: ROOT });
-console.log('已更新本地 origin/main →', commit.sha.slice(0, 7));
+// 同步本地跟踪引用：先尝试 fetch 取得 API 创建的提交对象；失败则只提示，不影响已完成的推送
+let fetched = false;
+try {
+  execFileSync('git', ['fetch', 'origin', 'main'], { cwd: ROOT, stdio: 'ignore' });
+  fetched = true;
+} catch {}
+try {
+  execFileSync('git', ['update-ref', 'refs/remotes/origin/main', commit.sha], { cwd: ROOT, stdio: 'ignore' });
+  console.log('已更新本地 origin/main →', commit.sha.slice(0, 7));
+} catch {
+  console.log(`远端 main 已更新；本地 origin/main 未同步（对象尚未取回${fetched ? '' : '，git fetch 失败'}）。`);
+}
 
 if (NO_TAG) {
   console.log('已跳过标签创建（--no-tag）');
