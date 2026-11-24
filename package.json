@@ -9,6 +9,7 @@
     "start": "npx serve .",
     "verify": "node scripts/verify.mjs",
     "check-data": "node scripts/check-data.mjs",
+    "doctor": "node scripts/check-release.mjs",
     "build-lite": "node scripts/build-lite.mjs",
     "build-pinyin": "node scripts/build-pinyin.mjs",
     "fetch-data": "node scripts/fetch-bangumi.mjs",
