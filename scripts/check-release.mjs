@@ -108,6 +108,21 @@ if (!localTag) {
   if (type !== 'tag') warn(`标签 ${tag} 不是 annotated tag（当前 ${type}）`);
 }
 
+// tag 审计是本地周期检查：CI 的本地 tag 来自同一远端，放进每次 CI 会退化
+if (!process.env.CI) {
+  let tagAudit = null;
+  try { tagAudit = JSON.parse(read('.git/yuc-tag-audit.json')); } catch {}
+  if (!tagAudit) {
+    warn('尚无 tag 审计记录，建议运行 npm run tags -- --strict');
+  } else {
+    const days = (Date.now() - new Date(tagAudit.checkedAt).getTime()) / 86400000;
+    if (!Number.isFinite(days)) warn('tag 审计记录时间格式异常');
+    else if (tagAudit.issues > 0) warn(`上次 tag 审计有 ${tagAudit.issues} 处不一致`);
+    else if (days > 30) warn(`tag 审计已过期 ${Math.floor(days)} 天（npm run tags -- --strict）`);
+    else pass(`tag 审计在 30 天内且无异常（${tagAudit.local} 个）`);
+  }
+}
+
 const cited = handover.match(/发布代码提交\s+`([0-9a-f]{7,40})`/);
 if (cited) {
   try {
