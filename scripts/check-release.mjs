@@ -44,6 +44,23 @@ expect(lock.packages && lock.packages[''] && lock.packages[''].version === versi
 const manifest = JSON.parse(read('manifest.webmanifest'));
 expect(manifest.version === version, 'manifest.webmanifest 版本一致', `实际 ${manifest.version}`);
 
+// 数据快照年龄：超过 120 天在 strict 下阻止发布，提示安排抓取
+try {
+  const dataSrc = read('data/anime-data.js');
+  const metaMatch = dataSrc.match(/window\.ANIME_META = (\{.*?\});/);
+  if (!metaMatch) {
+    warn('无法读取数据快照时间（ANIME_META）');
+  } else {
+    const dataMeta = JSON.parse(metaMatch[1]);
+    const days = Math.floor((Date.now() - new Date(dataMeta.generatedAt).getTime()) / 86400000);
+    if (!Number.isFinite(days)) warn('数据快照时间格式异常');
+    else if (days > 120) warn(`数据快照已 ${days} 天未更新（>120 天）`);
+    else pass(`数据快照 ${days} 天前（${dataMeta.count} 部）`);
+  }
+} catch {
+  warn('无法读取 data/anime-data.js');
+}
+
 // ---------- 2. Service Worker ----------
 const sw = read('sw.js');
 const cacheName = (sw.match(/var CACHE = '([^']+)'/) || [])[1];

@@ -1,6 +1,7 @@
 // 从 Bangumi 镜像 API 抓取历年番剧数据，按季度分文件缓存后合并为 data/anime-data.js
-// 用法：node scripts/fetch-bangumi.mjs
+// 用法：node scripts/fetch-bangumi.mjs [--refresh] [--dry-run]
 // 已抓取的季度会自动跳过，可重复运行增量补齐。
+// --dry-run：只做源预检、缓存统计与快照年龄报告，不写任何数据文件。
 
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,12 +15,15 @@ import { genreIdsFromNames, rawTagNames } from './genres.mjs';
 // 注意：api.bgm.tv 官方接口协议/限流不同，不能直接用；切换前先确认返回结构兼容。
 const BASE = (process.env.BGM_API_BASE || 'https://bgmapi.anibt.net').replace(/\/+$/, '');
 const START_YEAR = 1990;
-const END_YEAR = 2026;
+// 下次季度刷新可用 END_YEAR=2027 覆盖，无需改代码
+const END_YEAR = Number(process.env.END_YEAR || 2026);
 const PAGE_SIZE = 20;
 const DELAY_MS = 800;
 const USER_AGENT = 'yuc-anime-list/1.0';
 // --refresh：忽略已有季度缓存，重新抓取（用于补充 tag 等新字段）
 const REFRESH = process.argv.includes('--refresh');
+// --dry-run：只预检与统计，不写数据文件
+const DRY = process.argv.includes('--dry-run');
 
 const rootDir = path.resolve(import.meta.dirname, '..');
 const buildDir = path.join(rootDir, 'data', 'build');
@@ -30,15 +34,18 @@ const pad = (n) => String(n).padStart(2, '0');
 
 function buildQuarters() {
   const list = [];
+  // 未来季度不进入计划：避免把空缓存写进 data/build 后被后续刷新跳过
+  const today = new Date().toISOString().slice(0, 10);
   for (let year = START_YEAR; year <= END_YEAR; year += 1) {
     for (const month of [1, 4, 7, 10]) {
       const nextYear = month === 10 ? year + 1 : year;
       const nextMonth = month === 10 ? 1 : month + 3;
-      list.push({
+      const q = {
         key: `${year}${pad(month)}`,
         start: `${year}-${pad(month)}-01`,
         end: `${nextYear}-${pad(nextMonth)}-01`,
-      });
+      };
+      if (q.start <= today) list.push(q);
     }
   }
   return list;
@@ -139,10 +146,12 @@ async function crawlQuarter(quarter) {
 // 行为：源不可达时，若季度缓存完整则自动离线重建；否则明确失败并给出指引。
 async function probeSource(quarters) {
   const url = `${BASE}/v0/search/subjects?limit=1&offset=0`;
+  // 用计划中最新一个季度做连通性探测，而不是硬编码 2026-01
+  const latest = quarters[quarters.length - 1];
   const payload = {
     keyword: '',
     sort: 'heat',
-    filter: { type: [2], air_date: ['>=2026-01-01', '<2026-04-01'] },
+    filter: { type: [2], air_date: [`>=${latest.start}`, `<${latest.end}`] },
   };
   try {
     const res = await fetch(url, {
@@ -155,7 +164,7 @@ async function probeSource(quarters) {
     const data = await res.json();
     if (!Array.isArray(data.data)) throw new Error('返回结构缺少 data 数组，镜像协议不兼容');
     console.log(`抓取源可用：${BASE}`);
-    return;
+    return 'online';
   } catch (err) {
     console.warn(`抓取源不可达：${BASE}（${err.message}）`);
   }
@@ -167,7 +176,7 @@ async function probeSource(quarters) {
   }
   if (missing.length === 0 && !REFRESH) {
     console.warn(`季度缓存完整（${quarters.length}/${quarters.length}），转为离线重建，不联网。`);
-    return;
+    return 'offline';
   }
   console.error('无法继续：');
   if (REFRESH) {
@@ -185,7 +194,34 @@ async function probeSource(quarters) {
 async function main() {
   await mkdir(buildDir, { recursive: true });
   const quarters = buildQuarters();
-  await probeSource(quarters);
+  const sourceMode = await probeSource(quarters);
+
+  if (DRY) {
+    const cached = [];
+    const missing = [];
+    for (const q of quarters) {
+      if (await exists(path.join(buildDir, `${q.key}.json`))) cached.push(q.key);
+      else missing.push(q.key);
+    }
+    console.log(`\n[dry-run] 抓取源：${BASE}（${sourceMode === 'online' ? '在线' : '离线缓存'}）`);
+    console.log(`[dry-run] 抓取范围：${START_YEAR}-${END_YEAR}（未来季度已排除），计划 ${quarters.length} 个季度`);
+    console.log(`[dry-run] 季度缓存：${cached.length} 完整 / ${missing.length} 缺失`);
+    if (missing.length) console.log(`[dry-run] 缺失季度：${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ' …' : ''}`);
+    let dataMeta = null;
+    try {
+      const src = await readFile(outFile, 'utf8');
+      const m = src.match(/window\.ANIME_META = (\{.*?\});/);
+      if (m) dataMeta = JSON.parse(m[1]);
+    } catch {}
+    if (dataMeta) {
+      const age = Math.floor((Date.now() - new Date(dataMeta.generatedAt).getTime()) / 86400000);
+      console.log(`[dry-run] 当前快照：${dataMeta.generatedAt}（${age} 天前），${dataMeta.count} 部`);
+      if (age > 120) console.log('[dry-run] 警告：数据快照已超过 120 天');
+    }
+    console.log('[dry-run] 未写入任何数据文件。');
+    return;
+  }
+
   const seen = new Set();
   const all = [];
   let fetched = 0;
