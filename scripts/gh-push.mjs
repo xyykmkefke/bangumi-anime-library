@@ -180,6 +180,19 @@ const after = ghJson([`repos/${REPO}/git/ref/heads/main`]);
 if (after.object.sha !== commit.sha) fail(`远端 main 更新后校验失败：${after.object.sha} != ${commit.sha}`);
 console.log('tree 校验一致:', localTree);
 
+// 记录本次实际推送的远端状态：origin/main 跟踪引用可能因网络滞后，doctor 以此为准
+try {
+  writeFileSync(path.join(ROOT, '.git', 'yuc-remote-state.json'), JSON.stringify({
+    repo: REPO,
+    main: commit.sha,
+    tree: localTree,
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+  console.log('已记录远端状态 → .git/yuc-remote-state.json');
+} catch (e) {
+  console.log('远端状态记录失败（不影响发布）：' + String(e.message).slice(0, 80));
+}
+
 // 同步本地跟踪引用：先尝试 fetch 取得 API 创建的提交对象；失败则只提示，不影响已完成的推送
 let fetched = false;
 try {

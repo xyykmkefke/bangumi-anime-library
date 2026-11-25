@@ -121,19 +121,27 @@ if (cited) {
 const status = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
 if (status) warn(`工作区有 ${status.split('\n').length} 个未提交改动（发布前应为空）`);
 
-// 以 tree 判断内容是否对齐：经 gh API 推送时提交哈希会不同，但 tree 必须一致
+// 以 tree 判断内容是否对齐：优先看 gh-push 记录（origin/main 跟踪引用可能因网络滞后），
+// 没有记录或记录不匹配时再退回 origin/main。
 const headTree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: ROOT, encoding: 'utf8' });
-const originTree = spawnSync('git', ['rev-parse', 'origin/main^{tree}'], { cwd: ROOT, encoding: 'utf8' });
-if (headTree.status !== 0 || originTree.status !== 0) {
-  warn('无法比较 origin/main（可能未 fetch）');
-} else if (headTree.stdout.trim() === originTree.stdout.trim()) {
-  pass('本地与 origin/main 内容一致（tree 相同；API 推送时提交哈希可能不同）');
+let remoteRecord = null;
+try { remoteRecord = JSON.parse(read('.git/yuc-remote-state.json')); } catch {}
+const headTreeValue = headTree.status === 0 ? headTree.stdout.trim() : null;
+if (headTreeValue && remoteRecord && remoteRecord.tree === headTreeValue) {
+  pass(`本地与 gh-push 记录的远端内容一致（${String(remoteRecord.main).slice(0, 7)}）`);
 } else {
-  const ahead = spawnSync('git', ['rev-list', '--count', 'origin/main..HEAD'], { cwd: ROOT, encoding: 'utf8' });
-  const n = ahead.status === 0 ? Number(ahead.stdout.trim()) : NaN;
-  if (n > 1) warn(`本地领先 origin/main ${n} 个提交且内容不同；发布前需先对齐远端`);
-  else if (n === 1) pass('本地领先 origin/main 1 个提交（待发布）');
-  else warn('本地与 origin/main 内容不一致，且无法用提交数判断');
+  const originTree = spawnSync('git', ['rev-parse', 'origin/main^{tree}'], { cwd: ROOT, encoding: 'utf8' });
+  if (headTree.status !== 0 || originTree.status !== 0) {
+    warn('无法比较 origin/main（可能未 fetch）');
+  } else if (headTree.stdout.trim() === originTree.stdout.trim()) {
+    pass('本地与 origin/main 内容一致（tree 相同；API 推送时提交哈希可能不同）');
+  } else {
+    const ahead = spawnSync('git', ['rev-list', '--count', 'origin/main..HEAD'], { cwd: ROOT, encoding: 'utf8' });
+    const n = ahead.status === 0 ? Number(ahead.stdout.trim()) : NaN;
+    if (n > 1) warn(`本地领先 origin/main ${n} 个提交且内容不同；发布前需先对齐远端`);
+    else if (n === 1) pass('本地领先 origin/main 1 个提交（待发布）');
+    else warn('本地与 origin/main 内容不一致，且无法用提交数判断');
+  }
 }
 
 // ---------- 输出 ----------
