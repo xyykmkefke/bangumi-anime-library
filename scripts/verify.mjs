@@ -3158,6 +3158,58 @@ async function main() {
       identifier: retryMock.result.identifier,
     });
 
+    // 条件写入：另一台设备在 pull 与 push 之间写了新状态时，必须重新合并，而不是用旧快照覆盖
+    const condMock = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const real = window.fetch.bind(window);
+        window.__cond = { gets: 0, patch: null };
+        window.fetch = function (url, opts) {
+          if (String(url).indexOf('api.github.com') < 0) return real.apply(this, arguments);
+          const method = (opts && opts.method) || 'GET';
+          const item = (window.ANIME_DATA || []).find((x) => (Number(x.e) || 0) > 4) || {};
+          if (method === 'GET') {
+            window.__cond.gets += 1;
+            // 第 1 次是同步开头的 pull；之后模拟另一台设备已写入更新的状态
+            const later = window.__cond.gets > 1;
+            return Promise.resolve(new Response(JSON.stringify({
+              id: 'gist-cond',
+              updated_at: later ? 'T2' : 'T1',
+              files: { 'yuc-anime-list.json': { content: JSON.stringify({
+                app: 'yuc-anime-list', version: 3, updatedAt: new Date().toISOString(),
+                items: [{ id: Number(item.i), status: later ? 'drop' : 'done', addedAt: 1, ep: 1, updatedAt: Date.now() }],
+                deleted: {},
+              }) } },
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+          if (method === 'PATCH') window.__cond.patch = opts.body;
+          return Promise.resolve(new Response(JSON.stringify({ id: 'gist-cond', updated_at: 'T9' }), {
+            status: 200, headers: { 'Content-Type': 'application/json' },
+          }));
+        };
+      })();`,
+    });
+    await cdp.evaluate(
+      "localStorage.setItem('yuc_my_anime_v1', '{}'); localStorage.setItem('yuc_gist_v1', JSON.stringify({ token: 'ghp_mock', gistId: 'gist-cond', lastSync: 0 }))",
+    );
+    await cdp.send('Page.reload');
+    let condOut = '';
+    for (let i = 0; i < 60; i += 1) {
+      try {
+        condOut = await cdp.evaluate(`(() => {
+          const c = window.__cond || {};
+          let pushed = null;
+          try { pushed = JSON.parse(JSON.parse(c.patch).files['yuc-anime-list.json'].content); } catch (e) {}
+          return JSON.stringify({ gets: c.gets || 0, status: pushed && pushed.items[0] && pushed.items[0].status });
+        })()`);
+        if (JSON.parse(condOut).status) break;
+      } catch {}
+      await sleep(250);
+    }
+    let condState = {};
+    try { condState = JSON.parse(condOut); } catch {}
+    check('云同步冲突时重新合并而非覆盖', condState.gets >= 2 && condState.status === 'drop', condOut);
+    await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: condMock.result.identifier });
+
     // 冷启动深链：首屏轻量数据只有最近一年，指向旧番的 d 参数应在全库补齐后打开
     await cdp.evaluate("localStorage.removeItem('yuc_gist_v1')");
     // 从构建产物里取一个确定不在首屏年份内的旧番，避免依赖页面当前加载阶段
@@ -3341,6 +3393,36 @@ async function main() {
     );
     check('交互过程无新增 JS 异常', lateErrors.length === jsErrors.length,
       lateErrors.length === jsErrors.length ? '' : String(lateErrors[lateErrors.length - 1].method));
+
+    // 筛选胶囊与顶部 tab 的选中态必须同时暴露给读屏（此前只有 .active 类，颜色之外无法感知）
+    const pressed = await cdp.evaluate(`(() => {
+      const tabs = [].slice.call(document.querySelectorAll('.tab'));
+      const yearBtn = document.querySelector('#years .pill.active');
+      const seasonBtn = document.querySelector('#seasons .pill.active');
+      return [
+        tabs.length > 0 && tabs.every((b) => b.hasAttribute('aria-pressed')),
+        !!yearBtn && yearBtn.getAttribute('aria-pressed') === 'true',
+        !!seasonBtn && seasonBtn.getAttribute('aria-pressed') === 'true',
+      ].join('|');
+    })()`);
+    check('筛选胶囊与 tab 暴露 aria-pressed', pressed === 'true|true|true', pressed);
+
+    // 另一个标签页写入清单：storage 事件应触发按时间戳合并，而不是各自持旧快照
+    const crossTab = await cdp.evaluate(`(() => {
+      const item = (window.ANIME_DATA || []).find((x) => (Number(x.e) || 0) > 4) || {};
+      const target = String(item.i);
+      const next = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      // 模拟另一标签页：写入更新的状态，并派发 storage 事件（真实事件不会在同一文档触发）
+      next[target] = { s: 'done', t: 1, ep: 5, u: Date.now() + 1000 };
+      const raw = JSON.stringify(next);
+      localStorage.setItem('yuc_my_anime_v1', raw);
+      window.dispatchEvent(new StorageEvent('storage', { key: 'yuc_my_anime_v1', newValue: raw }));
+      return new Promise((resolve) => setTimeout(() => {
+        const m = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+        resolve([!!m[target], m[target] && m[target].s, m[target] && m[target].ep].join('|'));
+      }, 400));
+    })()`);
+    check('其他标签页的改动按时间戳合并', crossTab === 'true|done|5', crossTab);
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");

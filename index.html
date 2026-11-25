@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.18">
+<meta name="version" content="1.6.19">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.18</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.19</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2737,6 +2737,8 @@
 
   var myMap = loadMine();
   var myDeleted = loadDeleted();
+  // 清单版本号：每次写入递增，供筛选结果缓存判断是否需要重算
+  var mapRev = 0;
   // 探测本地存储是否可用，不可用时给出常驻提示
   var canStore = (function () {
     try {
@@ -2837,6 +2839,7 @@
   }
 
   function saveMine(opts) {
+    mapRev += 1;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
     } catch (e) {
@@ -3089,9 +3092,11 @@
   function renderHist() {
     var box = $('searchHist');
     if (!box) return;
+    // 焦点在面板内时也要保持展开，否则键盘 Tab 进历史词会立刻被收起
+    var active = document.activeElement;
     var open = searchHist.length > 0 &&
-      document.activeElement === searchEl &&
-      !searchEl.value.trim();
+      !searchEl.value.trim() &&
+      (active === searchEl || (active && box.contains(active)));
     box.hidden = !open;
     if (!open) { histIndex = -1; return; }
     if (histIndex >= searchHist.length) histIndex = -1;
@@ -3222,7 +3227,9 @@
       hideMineBtn.classList.toggle('primary', state.hideMine);
     }
     document.querySelectorAll('.tab').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.tab === state.tab);
+      var on = b.dataset.tab === state.tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     syncViewSelect();
     renderYears();
@@ -3295,10 +3302,11 @@
     var start = META.startYear || 1990;
     var end = META.endYear || now.getFullYear();
     // 「全部」不限制年份，配合分页按评分/热度翻看全库，便于发现老番
-    var html = '<button class="pill' + (state.year === 'all' ? ' active' : '') +
-      '" data-year="all" title="不限年份，浏览全部番剧">全部</button>';
+    var html = '<button class="pill' + (state.year === 'all' ? ' active' : '') + '" data-year="all"' +
+      ' aria-pressed="' + (state.year === 'all' ? 'true' : 'false') + '" title="不限年份，浏览全部番剧">全部</button>';
     for (var y = end; y >= start; y -= 1) {
-      html += '<button class="pill' + (String(y) === state.year ? ' active' : '') + '" data-year="' + y + '">' + y + '</button>';
+      html += '<button class="pill' + (String(y) === state.year ? ' active' : '') + '" data-year="' + y +
+        '" aria-pressed="' + (String(y) === state.year ? 'true' : 'false') + '">' + y + '</button>';
     }
     $('years').innerHTML = html;
   }
@@ -3306,7 +3314,8 @@
   function renderSeasons() {
     var seasons = [['all', '全年'], ['1', '1月'], ['4', '4月'], ['7', '7月'], ['10', '10月']];
     $('seasons').innerHTML = seasons.map(function (s) {
-      return '<button class="pill' + (s[0] === state.season ? ' active' : '') + '" data-season="' + s[0] + '">' + s[1] + '</button>';
+      return '<button class="pill' + (s[0] === state.season ? ' active' : '') + '" data-season="' + s[0] +
+        '" aria-pressed="' + (s[0] === state.season ? 'true' : 'false') + '">' + s[1] + '</button>';
     }).join('');
   }
 
@@ -3369,7 +3378,8 @@
     });
     var groups = [['all', '全部']].concat(STATUS_ORDER.map(function (k) { return [k, STATUS[k]]; }));
     $('statusRow').innerHTML = groups.map(function (g) {
-      return '<button class="pill' + (state.status === g[0] ? ' active' : '') + '" data-status="' + g[0] + '">' +
+      return '<button class="pill' + (state.status === g[0] ? ' active' : '') + '" data-status="' + g[0] +
+        '" aria-pressed="' + (state.status === g[0] ? 'true' : 'false') + '">' +
         g[1] + '<span class="n">' + counts[g[0]] + '</span></button>';
     }).join('');
   }
@@ -3472,7 +3482,23 @@
       (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
   }
 
+  // 筛选结果缓存：每次打开详情、按 ←/→ 切换都会重跑全库过滤 + 排序（近万条），状态没变时直接复用
+  var listCache = { key: '', list: null };
+  function listFingerprint() {
+    return [state.tab, state.year, state.season, state.platform, state.region, state.genre, state.sort,
+      state.status, state.onlyMine, state.highScore, state.hideMine, state.mineSort, state.q,
+      mapRev, DATA.length, fullReady ? 1 : 0].join('|');
+  }
   function filteredList() {
+    var key = listFingerprint();
+    if (listCache.key === key) return listCache.list;
+    var out = computeFiltered();
+    listCache.key = key;
+    listCache.list = out;
+    return out;
+  }
+
+  function computeFiltered() {
     var list = baseList();
     var q = state.q.trim().toLowerCase();
     var allTokens = searchTokens(q);
@@ -4177,16 +4203,36 @@
   }
 
   // 相似推荐：题材重叠优先，其次同类型同地区，再按评分接近程度取前 4 部
+  // 相似推荐索引：按「平台|地区」与「平台」预分组，避免每次打开详情都全库扫两遍
+  var similarIndex = { rev: '', byKey: null, byPlatform: null };
+  function buildSimilarIndex() {
+    var rev = DATA.length + '|' + (fullReady ? 1 : 0);
+    if (similarIndex.rev === rev) return similarIndex;
+    var byKey = Object.create(null);
+    var byPlatform = Object.create(null);
+    DATA.forEach(function (x) {
+      var key = x.p + '|' + x.g;
+      (byKey[key] || (byKey[key] = [])).push(x);
+      (byPlatform[x.p] || (byPlatform[x.p] = [])).push(x);
+    });
+    similarIndex = { rev: rev, byKey: byKey, byPlatform: byPlatform };
+    return similarIndex;
+  }
+
   function similarItems(item, limit) {
-    var pid = String(item.i);
     var base = Number(item.s) || 0;
-    var pool = DATA.filter(function (x) {
-      return String(x.i) !== pid && x.p === item.p && x.g === item.g;
+    var idx = buildSimilarIndex();
+    var pid = String(item.i);
+    var pool = (idx.byKey[item.p + '|' + item.g] || []).filter(function (x) {
+      return String(x.i) !== pid;
     });
     if (pool.length < limit) {
-      var extra = DATA.filter(function (x) {
-        return String(x.i) !== pid && x.p === item.p &&
-          !pool.some(function (p) { return String(p.i) === String(x.i); });
+      // 同平台补足：用集合判重，避免此前 pool.some(...) 的 O(n×m) 扫全库
+      var seen = Object.create(null);
+      seen[pid] = 1;
+      pool.forEach(function (p) { seen[String(p.i)] = 1; });
+      var extra = (idx.byPlatform[item.p] || []).filter(function (x) {
+        return !seen[String(x.i)];
       });
       pool = pool.concat(extra);
     }
@@ -4784,7 +4830,9 @@
     closeFilterSheet();
     closeDetail();
     document.querySelectorAll('.tab').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.tab === tab);
+      var on = b.dataset.tab === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     state.tab = tab;
     // 视图与数据集绑定：回退时给出解释，避免用户以为状态丢失
@@ -5059,8 +5107,11 @@
     histIndex = -1;
     renderHist();
   });
-  searchEl.addEventListener('blur', function () {
-    // 延迟隐藏，给「点击历史词」留出时间
+  searchEl.addEventListener('blur', function (e) {
+    // 焦点移到历史面板内（Tab 键）时保持展开；其余情况延迟隐藏，给「点击历史词」留出时间
+    var to = e.relatedTarget;
+    var box = $('searchHist');
+    if (to && box && box.contains(to)) return;
     setTimeout(renderHist, 120);
   });
 
@@ -5972,11 +6023,17 @@
     return fetch(url, options);
   }
 
-  function gistRequest(cfg, method, path, body) {
+  // 远端快照标记：上次拉取时的 ETag 与 updated_at，PATCH 前用它判断远端是否被别的设备改过
+  var syncStamp = { etag: '', updatedAt: '' };
+
+  function gistRequest(cfg, method, path, body, extraHeaders) {
     var headers = {
       Authorization: 'Bearer ' + cfg.token,
       Accept: 'application/vnd.github+json'
     };
+    if (extraHeaders) {
+      Object.keys(extraHeaders).forEach(function (k) { headers[k] = extraHeaders[k]; });
+    }
     var opts = { method: method, headers: headers };
     if (body) {
       headers['Content-Type'] = 'application/json';
@@ -5990,14 +6047,27 @@
         miss.code = 404;
         throw miss;
       }
+      if (res.status === 412) {
+        // If-Match 未命中：远端内容已变化
+        var stale = new Error('远端已被其他设备更新');
+        stale.code = 412;
+        throw stale;
+      }
       if (!res.ok) throw new Error('GitHub 返回 ' + res.status);
-      return res.json();
+      return res.json().then(function (data) {
+        // 记下 ETag 供条件写入使用；用不可枚举属性，避免被 JSON.stringify 带进请求体
+        try {
+          Object.defineProperty(data, '__etag', { value: res.headers.get('etag') || '', enumerable: false });
+        } catch (e) { /* 非对象或已冻结时忽略 */ }
+        return data;
+      });
     });
   }
 
   function gistPull(cfg) {
     if (!cfg.gistId) return Promise.resolve(null);
     return gistRequest(cfg, 'GET', '/gists/' + encodeURIComponent(cfg.gistId)).then(function (g) {
+      syncStamp = { etag: g.__etag || '', updatedAt: g.updated_at || '' };
       var file = g.files && g.files[GIST_FILE];
       if (!file) return null;
       if (file.truncated && file.raw_url) {
@@ -6020,28 +6090,61 @@
     });
   }
 
-  function gistPush(cfg, payload) {
+  function gistCreate(cfg, body) {
+    return gistRequest(cfg, 'POST', '/gists', body).then(function (g) {
+      cfg.gistId = g.id;
+      syncStamp = { etag: g.__etag || '', updatedAt: g.updated_at || '' };
+      saveSyncCfg(cfg);
+      return g;
+    });
+  }
+
+  // 冲突重推：远端在我们合并之后又被改过，重新拉取并按时间戳合并，再用最新状态重试
+  function gistRepush(cfg, attempt) {
+    return gistPull(cfg).then(function (remote) {
+      if (mergeRemote(remote)) {
+        saveMine({ fromSync: true });
+        render();
+      }
+      return gistPush(cfg, buildPayload(), attempt + 1);
+    });
+  }
+
+  function gistPush(cfg, payload, attempt) {
+    attempt = attempt || 0;
     var body = {
       description: '番剧库 · 我的追番（私有同步）',
       files: {}
     };
     body.files[GIST_FILE] = { content: JSON.stringify(payload, null, 2) };
-    var req;
-    if (cfg.gistId) {
-      req = gistRequest(cfg, 'PATCH', '/gists/' + encodeURIComponent(cfg.gistId), body)
-        .catch(function (err) {
-          if (err && err.code === 404) {
-            cfg.gistId = '';
-            return gistRequest(cfg, 'POST', '/gists', body);
-          }
-          throw err;
-        });
-    } else {
-      req = gistRequest(cfg, 'POST', '/gists', body);
-    }
-    return req.then(function (g) {
-      cfg.gistId = g.id;
-      saveSyncCfg(cfg);
+    if (!cfg.gistId) return gistCreate(cfg, body);
+
+    var path = '/gists/' + encodeURIComponent(cfg.gistId);
+    // 条件写入：先确认远端自上次拉取后没被别的设备改过，避免直接覆盖对方的改动
+    return gistRequest(cfg, 'GET', path).then(function (g) {
+      if (attempt < 3 && syncStamp.updatedAt && g.updated_at && g.updated_at !== syncStamp.updatedAt) {
+        return gistRepush(cfg, attempt);
+      }
+      var extra = null;
+      if (g.__etag) {
+        extra = { 'If-Match': g.__etag };
+        syncStamp.etag = g.__etag;
+      }
+      return gistRequest(cfg, 'PATCH', path, body, extra).catch(function (err) {
+        // 412：远端在 GET 与 PATCH 之间又变了（GitHub 支持 If-Match 时才会出现）
+        if (err && err.code === 412 && attempt < 3) return gistRepush(cfg, attempt);
+        throw err;
+      });
+    }).catch(function (err) {
+      // Gist 被删掉时重新创建，不阻断同步
+      if (err && err.code === 404) return gistCreate(cfg, body);
+      throw err;
+    }).then(function (g) {
+      if (g && g.id) {
+        cfg.gistId = g.id;
+        syncStamp = { etag: g.__etag || syncStamp.etag, updatedAt: g.updated_at || '' };
+        saveSyncCfg(cfg);
+      }
       return g;
     });
   }
@@ -6401,14 +6504,18 @@
     document.head.appendChild(s);
   }
 
-  // 并行竞速：两个 CDN 同时发起，先成功者立即应用，未完成者被移除；
-  // 全部失败或超时后回退同源。最坏耗时从串行 3×10s 缩短为 CDN 6s + 同源 10s。
+  // 备份源错开启动：两个 CDN 全速并行会把 2.58MB 下载两遍，
+  // 所以第二个源延后 1.2s 才发起，只有首个源明显慢/失败时才真正并上下载。
+  // 全部失败或超时后回退同源；最坏耗时仍是 CDN 6s + 同源 10s 的量级。
   function raceFullSources() {
     var list = fullDataSources();
     var cdn = list.filter(function (u) { return /^https:/.test(u); });
     if (!cdn.length) { tryOriginSource(); return; }
     var pending = cdn.length;
-    cdn.forEach(function (src) {
+    var applying = false;
+
+    function startOne(src) {
+      if (applying || fullReady) return;
       var s = document.createElement('script');
       var settled = false;
       var timer = setTimeout(function () {
@@ -6427,7 +6534,11 @@
         if (settled || fullReady) return;
         settled = true;
         clearTimeout(timer);
-        if ((window.ANIME_DATA || []).length > DATA.length) { applyFullData(); return; }
+        if ((window.ANIME_DATA || []).length > DATA.length) {
+          applying = true;
+          applyFullData();
+          return;
+        }
         pending -= 1;
         if (!pending) tryOriginSource();
       };
@@ -6439,6 +6550,11 @@
         if (!pending) tryOriginSource();
       };
       document.head.appendChild(s);
+    }
+
+    cdn.forEach(function (src, i) {
+      if (i === 0) startOne(src);
+      else setTimeout(function () { startOne(src); }, 1200 * i);
     });
   }
 
@@ -6484,6 +6600,20 @@
   if (syncCfg.token && syncCfg.gistId) {
     setTimeout(function () { syncNow(true); }, 1200);
   }
+
+  // 其他标签页改了清单：按 updatedAt 合并而不是整份覆盖，避免后写的一方吞掉对方的改动
+  window.addEventListener('storage', function (e) {
+    if (e.key !== STORAGE_KEY && e.key !== DEL_KEY) return;
+    var disk = loadMine();
+    var items = Object.keys(disk).map(function (id) {
+      var m = disk[id];
+      return { id: Number(id), status: m.s, addedAt: m.t || 0, ep: m.ep || 0, updatedAt: m.u || m.t || 0 };
+    });
+    if (!mergeRemote({ items: items, deleted: loadDeleted() })) return;
+    saveMine({ fromSync: true });
+    render();
+    toast('已合并其他标签页的追番改动');
+  });
 })();
 </script>
 <script>
