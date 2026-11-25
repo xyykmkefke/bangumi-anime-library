@@ -84,7 +84,10 @@ if (checkCalls > 0) {
 
 const ci = read('.github/workflows/ci.yml');
 expect(ci.includes('npm run doctor'), 'CI 已接入 doctor');
+expect(ci.includes('npm run audit -- --check'), 'CI 已接入对比度审计门禁');
 expect(ci.includes('fetch-depth: 0'), 'CI 拉取完整历史以校验 tag');
+expect(readme.includes('npm run smoke'), 'README 已记录 smoke 命令');
+expect(readme.includes('npm run tags'), 'README 已记录 tags 命令');
 
 // ---------- 5. Git / 标签 ----------
 const gitignore = read('.gitignore');

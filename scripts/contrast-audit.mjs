@@ -1,7 +1,8 @@
 // 文字可见度审计：无头浏览器渲染页面，遍历明暗两套主题 × 12 种 UI 状态下
 // 所有可见文字，取计算后的前景色与实际生效背景色（含透明度合成、渐变近似、
 // 图片底纹的最坏情况），按 WCAG AA（正文 4.5 / 大字 3.0）计算对比度。
-// 用法：node scripts/contrast-audit.mjs   （输出摘要 + .loop/contrast-report.md）
+// 用法：node scripts/contrast-audit.mjs [--check]
+//   --check：不达标或任一状态审计失败时以 1 退出，可作为 CI 门禁
 
 import http from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -14,6 +15,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const PORT = 8790;
 const CDP_PORT = 9336;
 const TIMEOUT_MS = 30000;
+const CHECK = process.argv.includes('--check');
 
 const EDGE_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -325,6 +327,7 @@ async function main() {
   const server = await startServer();
   let child = null;
   let ws = null;
+  let auditFailed = false;
   const report = { dark: {}, light: {} };
 
   try {
@@ -381,6 +384,7 @@ async function main() {
     }
     await sleep(300);
 
+    let failedStates = 0;
     async function runStates(theme) {
       const allItems = [];
       let totalText = 0;
@@ -388,6 +392,7 @@ async function main() {
         try {
           await cdp.evaluate(st.setup);
         } catch (err) {
+          failedStates += 1;
           console.log(`  [跳过] ${st.name}：setup 失败 ${err.message.slice(0, 60)}`);
           continue;
         }
@@ -395,10 +400,17 @@ async function main() {
         // 状态脚本会触发 render 并按 hash/偏好重设 data-theme；审计前强制回到目标主题
         await cdp.evaluate(`document.documentElement.setAttribute('data-theme', '${theme}')`);
         await sleep(80);
+        const applied = await cdp.evaluate("document.documentElement.getAttribute('data-theme')");
+        if (applied !== theme) {
+          failedStates += 1;
+          console.log(`  [失败] ${st.name}：主题未切到 ${theme}（实际 ${applied}）`);
+          continue;
+        }
         let res = null;
         try {
           res = await cdp.evaluate(AUDIT_FN);
         } catch (err) {
+          failedStates += 1;
           console.log(`  [跳过] ${st.name}：审计失败 ${err.message.slice(0, 60)}`);
         }
         if (st.cleanup) {
@@ -467,6 +479,12 @@ async function main() {
     const header = `# 文字可见度审计报告\n\n生成时间：${new Date().toLocaleString('zh-CN')}\n标准：WCAG AA（正文 ≥ 4.5，大字 ≥ 3.0；大字 = ≥24px 或 ≥18.66px 且粗体）\n范围：明暗两套主题 × ${STATES.length} 种 UI 状态；图片底纹上的文字按最坏情况（芯片下垫纯黑/纯白）取最小值。\n局限：伪元素 content 文本未覆盖；图片实际像素不可预知，图片底纹结论为最坏情况。\n`;
     await writeFile(path.join(ROOT, '.loop', 'contrast-report.md'), header + lines.join('\n') + '\n', 'utf8');
     console.log(`\n报告已写入 .loop/contrast-report.md；不达标组合 ${worstCount} 个。`);
+    if (CHECK) {
+      auditFailed = worstCount > 0 || failedStates > 0;
+      console.log(auditFailed
+        ? `\n[check] 审计未通过：不达标 ${worstCount}，失败状态 ${failedStates}`
+        : '\n[check] 审计通过');
+    }
   } finally {
     try { ws && ws.close(); } catch {}
     if (child) {
@@ -479,7 +497,7 @@ async function main() {
     server.close();
     await rmSafe(profile);
   }
-  setImmediate(() => process.exit(0));
+  setImmediate(() => process.exit(auditFailed ? 1 : 0));
 }
 
 async function rmSafe(p) {

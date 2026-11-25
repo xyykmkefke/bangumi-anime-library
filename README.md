@@ -79,6 +79,8 @@ python -m http.server 8080
 │   ├── verify.mjs          # 端到端验收（本地服务 + 无头浏览器）
 │   ├── check-release.mjs   # 发布一致性自检（版本 / 文档 / SW / tag）
 │   ├── contrast-audit.mjs  # 明暗主题文字对比度审计（WCAG AA）
+│   ├── check-tags.mjs      # 本地 / 远端 tag 完整性审计
+│   ├── smoke-release.mjs   # 发布后线上冒烟
 │   └── gh-push.mjs         # 经 gh api 发布 main 与版本标签
 ├── sw.js                   # Service Worker
 ├── manifest.webmanifest    # PWA 配置
@@ -93,6 +95,9 @@ python -m http.server 8080
 ```bash
 npm run check-data   # 数据质量校验
 npm run doctor       # 发布一致性自检（版本 / 文档 / SW / tag）
+npm run audit        # 对比度审计；加 -- --check 作为门禁
+npm run tags         # 本地 / 远端 tag 完整性审计
+npm run smoke        # 发布后线上冒烟（需网络与 gh）
 npm run build-lite   # 重新生成首屏轻量数据
 npm run build-pinyin # 补充拼音首字母（需先 npm install）
 npm run verify       # 端到端验收，需要本机安装 Edge 或 Chrome

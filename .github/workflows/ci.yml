@@ -39,3 +39,8 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: npm run verify
+
+      - name: 对比度审计门禁
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: npm run audit -- --check
