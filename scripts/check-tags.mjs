@@ -10,7 +10,8 @@ const STRICT = process.argv.includes('--strict');
 const REPO = 'xyykmkefke/bangumi-anime-library';
 
 function git(args) {
-  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+  // 网络操作（ls-remote）加超时，避免 GitHub 不可达时长时间挂起
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', timeout: 15000 }).trim();
 }
 
 function ghJson(args) {

@@ -196,7 +196,7 @@ try {
 // 同步本地跟踪引用：先尝试 fetch 取得 API 创建的提交对象；失败则只提示，不影响已完成的推送
 let fetched = false;
 try {
-  execFileSync('git', ['fetch', 'origin', 'main'], { cwd: ROOT, stdio: 'ignore' });
+  execFileSync('git', ['fetch', 'origin', 'main'], { cwd: ROOT, stdio: 'ignore', timeout: 15000 });
   fetched = true;
 } catch {}
 try {
