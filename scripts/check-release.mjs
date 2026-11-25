@@ -105,6 +105,18 @@ const devlog = read('番剧开发日志.md');
 expect(devlog.includes(`- 当前版本：**v${version}**`), `开发日志当前版本为 v${version}`);
 expect(new RegExp(`^\\| v${esc(version)} \\|`, 'm').test(devlog), `开发日志时间线含 v${version}`);
 
+// changelog 在 .loop/ 下（gitignore），仍应逐版记录；缺段说明发版时漏写
+let changelog = '';
+try {
+  changelog = read('.loop/changelog.md');
+} catch {
+  warn('无法读取 .loop/changelog.md（本地工作副本缺失）');
+}
+if (changelog) {
+  const heading = new RegExp(`^## v${esc(version)}\\b`, 'm');
+  expect(heading.test(changelog), `.loop/changelog.md 含 v${version} 段落`, '发版时漏写 changelog');
+}
+
 // ---------- 4. 验收数量与 CI ----------
 const verifySrc = read('scripts/verify.mjs');
 const checkCalls = (verifySrc.match(/\bcheck\(/g) || []).length - (/function check\(/.test(verifySrc) ? 1 : 0);
@@ -122,6 +134,8 @@ expect(ci.includes('npm run audit -- --check'), 'CI 已接入对比度审计门�
 expect(ci.includes('fetch-depth: 0'), 'CI 拉取完整历史以校验 tag');
 expect(readme.includes('npm run smoke'), 'README 已记录 smoke 命令');
 expect(readme.includes('npm run tags'), 'README 已记录 tags 命令');
+expect(readme.includes('npm run perf'), 'README 已记录 perf 命令');
+expect(readme.includes('npm run check-loading'), 'README 已记录 check-loading 命令');
 
 // ---------- 5. Git / 标签 ----------
 const gitignore = read('.gitignore');

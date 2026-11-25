@@ -50,9 +50,14 @@ function findBrowser() {
 }
 
 function startServer() {
+  // 注：加载期搜索（全库未就绪时的提示与结果收敛）不在本文件断言。
+  // 它依赖干净初始页态，且需要持续延迟 anime-data.js；塞进这个跑了上百个用例的
+  // 上下文里会被累积状态干扰，故独立为 scripts/check-loading-search.mjs（npm run check-loading）。
   const server = http.createServer(async (req, res) => {
     try {
-      let pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      const reqUrl = new URL(req.url, 'http://localhost');
+      let pathname = decodeURIComponent(reqUrl.pathname);
+
       if (pathname === '/') pathname = '/index.html';
       const file = path.join(ROOT, pathname);
       const rel = path.relative(ROOT, file);
@@ -3240,6 +3245,7 @@ async function main() {
       await sleep(250);
     }
     check('冷启动深链在全库补齐后打开', coldOk, coldNote);
+
 
     // 我的番剧为空：给出明确下一步「去全部番剧」
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); history.replaceState(null, '', location.pathname + location.search); true");

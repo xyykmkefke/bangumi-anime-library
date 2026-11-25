@@ -93,18 +93,26 @@ python -m http.server 8080
 ## 开发与验收
 
 ```bash
-npm run check-data   # 数据质量校验
-npm run doctor       # 发布一致性自检（版本 / 文档 / SW / tag）
-npm run audit        # 对比度审计；加 -- --check 作为门禁
-npm run tags         # 本地 / 远端 tag 完整性审计
-npm run smoke        # 发布后线上冒烟（需网络与 gh）
-npm run build-lite   # 重新生成首屏轻量数据
-npm run build-pinyin # 补充拼音首字母（需先 npm install）
-npm run verify       # 端到端验收，需要本机安装 Edge 或 Chrome
-npm run fetch-data   # 重新抓取数据
+npm run verify        # 端到端验收（157 项），需要本机安装 Edge 或 Chrome
+npm run check-loading # 加载期搜索行为（全库未就绪时不误报「没有找到」）
+npm run perf          # 性能基线（FCP / 首屏可交互 / 交互响应 / 弱网），超预算退出码 1
+npm run audit         # 对比度审计；加 -- --check 作为门禁
+npm run check-data    # 数据质量校验
+npm run doctor        # 发布一致性自检（版本 / 文档 / SW / tag）
+npm run tags          # 本地 / 远端 tag 完整性审计
+npm run smoke         # 发布后线上冒烟（需网络与 gh）
+npm run build-lite    # 重新生成首屏轻量数据
+npm run build-pinyin  # 补充拼音首字母（需先 npm install）
+npm run fetch-data    # 重新抓取数据
 ```
 
 `verify.mjs` 会在本机启动静态服务器与无头浏览器，覆盖搜索、筛选、收藏、视图、分享、PWA、无障碍等核心流程。
+
+`perf-baseline.mjs` 用同样的方式测速度：冷启动口径（无缓存、绕过 SW、屏蔽第三方封面图）量 FCP 与首屏卡片可交互，再量五类常用交互的响应，最后在 Slow 3G 下复测首屏。超预算即退出码 1，可用于防止性能退化。
+
+`check-loading-search.mjs` 单独验证加载期搜索：服务端把全库数据延迟 8 秒，在首屏已渲染、全库未就绪的窗口内搜索一个「仅全库存在」的条目，断言提示为「正在加载」而非「没有找到」、搜索词被保留、就绪后无需重搜即自动出结果。之所以独立成脚本而不并入 `verify`，是因为它依赖干净的初始页面状态——`verify` 跑到中段时 SW 已注册、偏好与视图被上百个用例改过，时序类断言在那里不可靠。
+
+**性能基线（v1.6.19，本机无头 Edge）**：FCP 76ms、DOMContentLoaded 64ms、首屏 123 张卡片可交互 174ms；交互 8–30ms；Slow 3G 首屏 7.8s。首屏 JS 传输约 2.5MB —— 首屏走 `anime-lite.js`（140KB）渲染，全量 `anime-data.js`（2.5MB）在 idle 时后台补齐以支撑全库搜索与跨年浏览。
 
 ## 版本
 

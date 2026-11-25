@@ -11,6 +11,8 @@
     "check-data": "node scripts/check-data.mjs",
     "doctor": "node scripts/check-release.mjs",
     "audit": "node scripts/contrast-audit.mjs",
+    "perf": "node scripts/perf-baseline.mjs",
+    "check-loading": "node scripts/check-loading-search.mjs",
     "smoke": "node scripts/smoke-release.mjs",
     "tags": "node scripts/check-tags.mjs",
     "build-lite": "node scripts/build-lite.mjs",
