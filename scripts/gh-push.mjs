@@ -46,7 +46,7 @@ function gh(args, input) {
     writeFileSync(file, JSON.stringify(input));
     full.push('--input', file);
   }
-  return execFileSync('gh', full, { encoding: 'utf8' }).trim();
+  return execFileSync('gh', full, { encoding: 'utf8', timeout: 60000 }).trim();
 }
 
 function ghJson(args, input) {
@@ -223,6 +223,21 @@ if (NO_TAG) {
     });
     console.log('已创建标签', TAG);
   } catch (e) {
-    console.log('标签创建跳过:', String(e.message).slice(0, 120));
+    // 重跑或并发时 ref 可能已存在：只有确认它指向本次提交才算成功，否则必须非零退出
+    let existing = null;
+    try {
+      const ref = ghJson([`repos/${REPO}/git/ref/tags/${TAG}`]);
+      existing = ref.object.type === 'tag'
+        ? ghJson([`repos/${REPO}/git/tags/${ref.object.sha}`]).object.sha
+        : ref.object.sha;
+    } catch {}
+    if (existing !== commit.sha) {
+      fail(
+        `标签 ${TAG} 创建失败：${String(e.message).split('\n')[0]}\n` +
+        `main 已推进到 ${commit.sha.slice(0, 7)}，但标签缺失或指向其他提交。\n` +
+        `请单独补建该标签（gh api repos/${REPO}/git/refs），不要重跑本脚本。`,
+      );
+    }
+    console.log(`标签 ${TAG} 已存在且指向 ${commit.sha.slice(0, 7)}，视为成功`);
   }
 }

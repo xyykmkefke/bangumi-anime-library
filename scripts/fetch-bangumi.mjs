@@ -192,7 +192,7 @@ async function probeSource(quarters) {
 }
 
 async function main() {
-  await mkdir(buildDir, { recursive: true });
+  // 先算季度再决定是否建目录：--dry-run 承诺不写任何文件
   const quarters = buildQuarters();
   const sourceMode = await probeSource(quarters);
 
@@ -222,8 +222,11 @@ async function main() {
     return;
   }
 
+  await mkdir(buildDir, { recursive: true });
+
   const seen = new Set();
   const all = [];
+  const emptyQuarters = [];
   let fetched = 0;
 
   console.log(`计划抓取 ${quarters.length} 个季度（${START_YEAR}-${END_YEAR}）`);
@@ -249,6 +252,7 @@ async function main() {
           items = JSON.parse(await readFile(cacheFile, 'utf8'));
           console.warn(`    ${quarter.key} 使用旧缓存`);
         } else {
+          emptyQuarters.push(quarter.key);
           continue;
         }
       }
@@ -265,6 +269,14 @@ async function main() {
       else delete rest.tg;
       all.push(rest);
     }
+  }
+
+  // 有季度抓取失败又没有旧缓存时，宁可中止也不要写出缩水快照（check-data 只看单条合法性，看不出总量骤降）
+  if (emptyQuarters.length) {
+    throw new Error(
+      `有 ${emptyQuarters.length} 个季度既抓取失败也无缓存：${emptyQuarters.slice(0, 8).join(', ')}` +
+      `${emptyQuarters.length > 8 ? ' …' : ''}\n已中止写入，现有快照保持不变。请恢复网络后重跑。`,
+    );
   }
 
   all.sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0));

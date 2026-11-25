@@ -20,13 +20,13 @@ function passOrFail(name, ok, detail) {
   record(Boolean(ok), name, detail);
 }
 function ghJson(args) {
-  return JSON.parse(execFileSync('gh', ['api', ...args], { encoding: 'utf8' }));
+  return JSON.parse(execFileSync('gh', ['api', ...args], { encoding: 'utf8', timeout: 60000 }));
 }
 function ghRuns(commit) {
   return JSON.parse(execFileSync('gh', [
     'run', 'list', '--workflow=ci.yml', '--commit', commit, '--limit=5',
     '--json', 'conclusion,status,headSha',
-  ], { encoding: 'utf8' }));
+  ], { encoding: 'utf8', timeout: 60000 }));
 }
 function runLabel(run) {
   return run ? (run.conclusion || run.status || 'unknown') : '未找到 CI run';
@@ -71,9 +71,21 @@ try {
   }
 
   if (tagCommit) {
-    const localTagCommit = execFileSync('git', ['rev-list', '-n1', tag], { cwd: ROOT, encoding: 'utf8' }).trim();
+    // 本地 tag 可能尚未取回（gh-push 走 API 建 tag）：先补一次，仍缺就如实记失败，不要抛异常中断其余检查
+    let localTagCommit = '';
+    for (const attempt of ['direct', 'fetch']) {
+      if (attempt === 'fetch') {
+        try {
+          execFileSync('git', ['fetch', '--tags', '--quiet'], { cwd: ROOT, stdio: 'ignore', timeout: 30000 });
+        } catch {}
+      }
+      try {
+        localTagCommit = execFileSync('git', ['rev-list', '-n1', tag], { cwd: ROOT, encoding: 'utf8', timeout: 15000 }).trim();
+        break;
+      } catch {}
+    }
     passOrFail('本地 tag 与远端 tag 指向同一提交', localTagCommit === tagCommit,
-      `${localTagCommit.slice(0, 7)} / ${tagCommit.slice(0, 7)}`);
+      localTagCommit ? `${localTagCommit.slice(0, 7)} / ${tagCommit.slice(0, 7)}` : `本地缺 ${tag}，先 git fetch --tags`);
 
     const relRuns = ghRuns(tagCommit);
     const relRun = relRuns[0];

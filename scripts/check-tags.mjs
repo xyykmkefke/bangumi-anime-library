@@ -15,7 +15,7 @@ function git(args) {
 }
 
 function ghJson(args) {
-  return JSON.parse(execFileSync('gh', ['api', ...args], { encoding: 'utf8' }));
+  return JSON.parse(execFileSync('gh', ['api', ...args], { encoding: 'utf8', timeout: 30000 }));
 }
 
 const local = new Map();
@@ -49,7 +49,13 @@ if (remoteRaw !== null) {
   }
 } else {
   try {
-    const refs = ghJson([`repos/${REPO}/git/refs/tags?per_page=100`]);
+    // 分页取全：默认 per_page=30、上限 100，tag 超过一页时只取首页会误报 missing-remote
+    const refs = [];
+    for (let page = 1; page <= 20; page += 1) {
+      const batch = ghJson([`repos/${REPO}/git/refs/tags?per_page=100&page=${page}`]);
+      refs.push(...batch);
+      if (batch.length < 100) break;
+    }
     remote = new Map();
     for (const ref of refs) {
       const name = ref.ref.replace(/^refs\/tags\//, '');

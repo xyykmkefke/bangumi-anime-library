@@ -1,26 +1,36 @@
-// 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-anime-shell-v26';
+// 应用壳离线缓存：页面网络优先并带超时回退，其余同源资源缓存优先、后台更新
+// 壳缓存随版本升级整体替换；封面单独放一个长期缓存，发版不再清空已下载的图片
+var CACHE = 'yuc-anime-shell-v27';
+var IMG_CACHE = 'yuc-anime-images-v1';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js'];
 var IMG_LIMIT = 500;
+
+// activate 时保留的缓存：其余 yuc-anime- 前缀的一律删除
+var KEEP = [CACHE, IMG_CACHE];
 
 // 封面缓存有上限：超出后按插入顺序清理最旧的，避免长期使用占满配额
 function trimImageCache(cache) {
   return cache.keys().then(function (keys) {
-    var imgs = keys.filter(function (req) {
-      return req.destination === 'image' || /bgmimg|anibt/.test(req.url);
-    });
-    if (imgs.length <= IMG_LIMIT) return null;
-    var drop = imgs.slice(0, imgs.length - IMG_LIMIT);
+    if (keys.length <= IMG_LIMIT) return null;
+    var drop = keys.slice(0, keys.length - IMG_LIMIT);
     return Promise.all(drop.map(function (req) { return cache.delete(req); }));
   }).catch(function () {});
+}
+
+// 缓存写入是后台动作：挂钩 waitUntil 防止响应返回后 SW 被回收导致写入丢失
+function keepAlive(e, promise) {
+  try { e.waitUntil(promise); } catch (err) { /* 事件已结束则退化为尽力而为 */ }
 }
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE).then(function (cache) {
-      // 强制走网络，避免 HTTP 缓存让新版本壳继续用旧文件
-      return cache.addAll(SHELL.map(function (url) {
-        return new Request(url, { cache: 'reload' });
+      // 逐项写入并容错：addAll 是全有或全无，任一文件 404 会让整次更新失败、旧 SW 长期驻留
+      return Promise.all(SHELL.map(function (url) {
+        // 强制走网络，避免 HTTP 缓存让新版本壳继续用旧文件
+        return cache.add(new Request(url, { cache: 'reload' })).catch(function () {
+          console.warn('[sw] 预缓存失败，已跳过：' + url);
+        });
       }));
     }).then(function () {
       return self.skipWaiting();
@@ -33,7 +43,7 @@ self.addEventListener('activate', function (e) {
     caches.keys().then(function (keys) {
       // 同源还部署着轻小说、galgame 等项目，只清理本项目前缀的旧缓存
       return Promise.all(keys.map(function (key) {
-        if (key === CACHE) return null;
+        if (KEEP.indexOf(key) >= 0) return null;
         if (key.indexOf('yuc-anime-') !== 0) return null;
         return caches.delete(key);
       }));
@@ -47,7 +57,7 @@ self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
 
-  // 封面等图片：缓存优先，命中直接返回，未命中走网络并写入缓存
+  // 封面等图片：缓存优先，命中直接返回，未命中走网络并写入专用的图片缓存
   if (req.destination === 'image') {
     e.respondWith(
       caches.match(req).then(function (hit) {
@@ -56,9 +66,9 @@ self.addEventListener('fetch', function (e) {
           // 封面多为跨域 opaque 响应（status 0），同样可以缓存供离线使用
           if (res.ok || res.type === 'opaque') {
             var copy = res.clone();
-            caches.open(CACHE).then(function (cache) {
+            keepAlive(e, caches.open(IMG_CACHE).then(function (cache) {
               return cache.put(req, copy).then(function () { return trimImageCache(cache); });
-            });
+            }));
           }
           return res;
         });
@@ -69,14 +79,19 @@ self.addEventListener('fetch', function (e) {
 
   var url = new URL(req.url);
 
-  // 全库数据走 jsDelivr：缓存优先，离线时也能打开
+  // 全库数据走 jsDelivr：标签 URL 不可变，命中即用；首次未命中才下载并缓存
   if (url.hostname.indexOf('jsdelivr.net') >= 0) {
+    var immutable = /@v\d/.test(url.pathname);
     e.respondWith(
       caches.match(req).then(function (hit) {
+        if (hit && immutable) return hit;
         var net = fetch(req).then(function (res) {
+          // 只缓存成功响应；脚本标签已启用 CORS，404/5xx 能如实拿到 ok=false，不再被当成好东西存下来
           if (res.ok || res.type === 'opaque') {
             var copy = res.clone();
-            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+            keepAlive(e, caches.open(CACHE).then(function (cache) { return cache.put(req, copy); }));
+          } else if (hit) {
+            return hit;
           }
           return res;
         }).catch(function () {
@@ -90,18 +105,25 @@ self.addEventListener('fetch', function (e) {
 
   if (url.origin !== self.location.origin) return;
 
+  // 手动"检查更新"的探测请求不拦截：它带唯一时间戳且要求 no-store，进缓存只会白占空间
+  if (url.searchParams.has('check')) return;
+
   // 页面本身：网络优先；1.5s 内没回来就先展示缓存，等下次启动再用新版
   if (req.mode === 'navigate') {
     e.respondWith(
-      caches.match(req).then(function (hit) {
+      caches.match(req, { ignoreSearch: true }).then(function (hit) {
         var net = fetch(req).then(function (res) {
           if (res.ok) {
             var copy = res.clone();
-            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+            // 以 pathname 规范化键写入，避免 ?utm/?from= 之类的查询串各存一份
+            var key = new Request(url.origin + url.pathname);
+            keepAlive(e, caches.open(CACHE).then(function (cache) { return cache.put(key, copy); }));
+            return res;
           }
-          return res;
+          // 部署中/回滚时的 502/404 不应盖掉可用的离线壳
+          return hit || res;
         }).catch(function () {
-          return hit || caches.match('./index.html');
+          return hit || caches.match('./', { ignoreSearch: true });
         });
         if (!hit) return net;
         var timer = new Promise(function (resolve) {
@@ -119,9 +141,10 @@ self.addEventListener('fetch', function (e) {
       var net = fetch(req).then(function (res) {
         if (res.ok) {
           var copy = res.clone();
-          caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+          keepAlive(e, caches.open(CACHE).then(function (cache) { return cache.put(req, copy); }));
+          return res;
         }
-        return res;
+        return hit || res;
       }).catch(function () {
         return hit;
       });
@@ -129,5 +152,3 @@ self.addEventListener('fetch', function (e) {
     })
   );
 });
-
-

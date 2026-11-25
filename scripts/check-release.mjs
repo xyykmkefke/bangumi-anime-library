@@ -70,6 +70,23 @@ expect(Boolean(cacheNum), 'SW 缓存名格式为 yuc-anime-shell-vN', cacheName 
 expect(/key\.indexOf\('yuc-anime-'\)\s*!==\s*0/.test(sw), 'SW activate 只清理本项目前缀');
 expect(/IMG_LIMIT\s*=\s*\d+/.test(sw), 'SW 封面缓存有上限');
 
+const imgCache = (sw.match(/var IMG_CACHE = '([^']+)'/) || [])[1];
+expect(Boolean(imgCache && imgCache.indexOf('yuc-anime-') === 0), 'SW 图片缓存使用 yuc-anime- 前缀', imgCache || '未找到 IMG_CACHE');
+expect(/var KEEP = \[CACHE, IMG_CACHE\]/.test(sw), 'SW activate 保留壳缓存与图片缓存');
+
+// 缓存号必须比上一个发布 tag 大：sw.js 字节不变时浏览器不会装新 SW，旧壳会长期驻留
+try {
+  const prevTag = git(['tag', '--list', 'v*', '--sort=-v:refname'])
+    .split(/\r?\n/).filter(Boolean).find((t) => t !== tag);
+  if (prevTag) {
+    const prevNum = Number((git(['show', `${prevTag}:sw.js`]).match(/var CACHE = 'yuc-anime-shell-v(\d+)'/) || [])[1]);
+    const cur = cacheNum ? Number(cacheNum[1]) : NaN;
+    expect(cur > prevNum, `SW 缓存号 ${cur} 大于 ${prevTag} 的 v${prevNum}`, `上一版 v${prevNum}`);
+  }
+} catch (e) {
+  warn('无法读取上一个 tag 的 sw.js 缓存号：' + e.message.split('\n')[0]);
+}
+
 // ---------- 3. 文档基线 ----------
 const readme = read('README.md');
 expect(readme.includes(`当前版本：**v${version}**`), `README 当前版本为 v${version}`);

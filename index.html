@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.17">
+<meta name="version" content="1.6.18">
 <style>
   :root {
     --bg: #0d0f14;
@@ -427,6 +427,8 @@
     flex-wrap: wrap;
     margin: 0 0 14px;
   }
+
+  .statusrow[hidden] { display: none; }
 
   .statusrow .pill .n {
     margin-left: 4px;
@@ -2239,13 +2241,17 @@
   }
   .cal-item .ci-state { display: block; margin-top: 2px; font-size: 10px; color: var(--accent); }
   .popmenu-empty { padding: 10px; color: var(--muted-2); font-size: 12px; }
+  /* 套用视图与删除视图是两个独立控件：不能把 role=button 塞进 button 里（非法嵌套、键盘不可达） */
+  .vrow { display: flex; align-items: stretch; gap: 4px; }
+  .vrow > button[data-view-apply] { flex: 1; min-width: 0; }
+  .vrow > .vdel { flex: 0 0 auto; width: auto; justify-content: center; }
   .vdel {
-    padding: 0 4px;
+    padding: 0 6px;
     color: var(--muted-2);
     font-size: 14px;
     line-height: 1;
   }
-  .vdel:hover { color: #ff9a9a; }
+  .vdel:hover, .vdel:focus-visible { color: #ff9a9a; }
   #toast button {
     margin-left: 10px;
     padding: 2px 8px;
@@ -2385,16 +2391,16 @@
         <div class="years" id="seasons" style="overflow: visible;"></div>
         <button class="pill nav" id="nextSeason" type="button" aria-label="下一季度">›</button>
         <button class="btn" id="nowSeasonBtn" type="button" title="回到当前年份与季度">本季</button>
-        <select id="platform" class="adv-filter">
+        <select id="platform" class="adv-filter" aria-label="平台类型">
           <option value="all">全部类型</option>
         </select>
-        <select id="region" class="adv-filter">
+        <select id="region" class="adv-filter" aria-label="地区">
           <option value="all">全部地区</option>
         </select>
-        <select id="genre">
+        <select id="genre" aria-label="题材">
           <option value="all">全部题材</option>
         </select>
-        <select id="sort">
+        <select id="sort" aria-label="排序方式">
           <option value="score">按评分</option>
           <option value="heat">按热度</option>
           <option value="date">按时间</option>
@@ -2502,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.17</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.18</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2747,6 +2753,8 @@
   var gridEl = $('grid');
   // 分批渲染：首屏最多 240 张，其余按需追加，避免一次性插入近万节点
   var PAGE_SIZE = 240;
+  // 上一次渲染的筛选指纹：变化时才把「显示更多」展开的条数收回第一批
+  var lastListKey = '';
 
   function updateLoadMore(total, shown, paged) {
     var rest = paged && total > shown ? total - shown : 0;
@@ -2832,7 +2840,10 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
     } catch (e) {
-      toast('浏览器禁止本地存储，请及时导出备份');
+      // 写入失败（配额满 / 隐私模式）时内存已改、磁盘没改，必须常驻提示，否则刷新后改动凭空消失
+      var warn = $('storageWarn');
+      if (warn) warn.hidden = false;
+      toast('本地存储写入失败：本次改动未保存，请导出备份后重试');
       return false;
     }
     // 云同步写入本机时不计数，也不触发回推，避免同步循环
@@ -3907,8 +3918,9 @@
     var views = loadViews();
     var html = views.length
       ? views.map(function (v, i) {
-        return '<button type="button" data-view-apply="' + i + '">' + escapeHtml(v.name) +
-          '<span class="vdel" data-view-del="' + i + '" role="button" aria-label="删除视图">×</span></button>';
+        return '<div class="vrow"><button type="button" data-view-apply="' + i + '">' + escapeHtml(v.name) +
+          '</button><button type="button" class="vdel" data-view-del="' + i + '" aria-label="删除视图 ' +
+          escapeHtml(v.name) + '">×</button></div>';
       }).join('')
       : '<div class="popmenu-empty">还没有保存的视图</div>';
     html += '<hr><button type="button" data-view-save="1">保存当前筛选为视图</button>';
@@ -3965,17 +3977,24 @@
       '<button class="btn" id="resetFilters" type="button">清除筛选条件</button>';
   }
 
-  // 平铺网格的增量同步：按 data-id 与 outerHTML 逐卡对比，内容未变的节点原样保留
+  // 平铺网格的增量同步：按 data-id 与「模板签名」逐卡对比，内容未变的节点原样保留
   // （封面不重载、图片不重解码），仅替换内容变化的节点并保持顺序；全部一致时零 DOM 操作。
+  // 注意：不能用 outerHTML 对比——封面 onload 会给节点加 loaded 类并写内联样式，
+  // 已挂载节点的 outerHTML 永远和新模板不同，那样等于每次都全量重建。
   function syncCards(html) {
     var tmp = document.createElement('div');
     tmp.innerHTML = html;
     var next = [].slice.call(tmp.children);
     var cur = [].slice.call(gridEl.children);
+    var sig = function (el) { return el.getAttribute('data-sig') || ''; };
+    // 新节点尚未挂载，outerHTML 即其原始模板；记下来供下次比较
+    for (var si = 0; si < next.length; si += 1) {
+      if (!next[si].getAttribute('data-sig')) next[si].setAttribute('data-sig', next[si].outerHTML);
+    }
     if (cur.length === next.length) {
       var same = true;
       for (var i = 0; i < next.length; i += 1) {
-        if (cur[i].outerHTML !== next[i].outerHTML) { same = false; break; }
+        if (sig(cur[i]) !== sig(next[i])) { same = false; break; }
       }
       if (same) return;
     }
@@ -3989,7 +4008,7 @@
       var node = next[ni];
       var nid = node.getAttribute('data-id');
       var exist = nid ? curById[nid] : null;
-      if (exist && exist.outerHTML === node.outerHTML) {
+      if (exist && sig(exist) === sig(node)) {
         frag.appendChild(exist);
         curById[nid] = null;
       } else if (exist) {
@@ -4010,6 +4029,14 @@
     // 视图与 tab 不匹配时回退，避免看板/日历在错误的数据集上显示空列
     if (state.tab === 'mine' && state.view === 'calendar') state.view = 'grid';
     if (state.tab === 'all' && state.view === 'board') state.view = 'grid';
+    // 「显示更多」展开的条数：只有筛选条件真正变化才收回第一批，否则任何一次重渲染都会把列表缩回去
+    var listKey = [state.tab, state.year, state.season, state.platform, state.region, state.genre, state.sort,
+      state.status, state.onlyMine, state.highScore, state.hideMine, state.view, state.group, state.groupBy,
+      state.mineSort, state.q].join('|');
+    if (listKey !== lastListKey) {
+      lastListKey = listKey;
+      state.limit = PAGE_SIZE;
+    }
     var list = filteredList();
     // 云端可能带回当前数据里还没有的旧条目，计数与列表保持一致，只算能展示的
     var mineTotal = 0;
@@ -4073,7 +4100,7 @@
       (state.tab === 'mine' && state.group && !board ? ' timeline' : '');
     var grouped = state.tab === 'mine' && state.group && !board;
     // 看板与分组一次展示全部；网格、列表、日历按批渲染
-    var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
+    var shown = board || grouped ? list : list.slice(0, state.limit || PAGE_SIZE);
     if (board) {
       gridEl.innerHTML = boardHtml(list);
     } else if (grouped) {
@@ -4893,6 +4920,8 @@
     var next = list.slice(start, start + PAGE_SIZE);
     if (!next.length) { updateLoadMore(list.length, start, false); return; }
     gridEl.insertAdjacentHTML('beforeend', next.map(cardHtml).join(''));
+    // 记住已展开的条数，后续 render（改状态、加入/移出等）不会缩回第一批
+    state.limit = start + next.length;
     // 新插入的卡片沿用 roving tabindex：只有首张进入 Tab 序列
     var cards = gridEl.querySelectorAll('.card');
     for (var i = start; i < cards.length; i += 1) {
@@ -5161,9 +5190,10 @@
       step = e.key === 'ArrowUp' ? -cols : cols;
     }
     var next = Math.max(0, Math.min(cards.length - 1, idx + step));
-    if (next === idx) return;
+    // 到头也要吃掉事件：否则 ←/→ 会冒泡到全局季度快捷键，在列表边界按一下整页换季
     e.preventDefault();
     e.stopPropagation();
+    if (next === idx) return;
     cards.forEach(function (c) { c.tabIndex = -1; });
     cards[next].tabIndex = 0;
     cards[next].focus();
@@ -6390,6 +6420,8 @@
         if (!pending) tryOriginSource();
       }, FULL_CDN_TIMEOUT);
       s.async = true;
+      // 走 CORS：jsDelivr 对正常与 404 响应都带 ACAO，SW 才能识别失败、不把错误页缓存成数据
+      s.crossOrigin = 'anonymous';
       s.src = src;
       s.onload = function () {
         if (settled || fullReady) return;

@@ -2473,6 +2473,10 @@ async function main() {
     check('iOS 安全区适配（viewport-fit 与安全区内边距）', safeAreaInfo === 'true|true|true|true', safeAreaInfo);
 
     // 回到顶部：滚动超过一屏后出现，点击平滑回顶并自动隐藏
+    // 该项依赖真实 scroll 事件与 requestAnimationFrame 回调；窗口被遮挡时页面转为
+    // visibilityState=hidden，浏览器不派发 scroll 也不跑 rAF，会导致误报失败，故先切到前台
+    await cdp.send('Page.bringToFront');
+    await sleep(200);
     const toTopInfo = await cdp.evaluate(`(async () => {
       const btn = document.getElementById('toTop');
       if (!btn) return 'no-btn';
@@ -3250,16 +3254,26 @@ async function main() {
     // ① 搜索分词预计算后，多关键词交集与排除词排序仍稳定
     const searchStable = await cdp.evaluate(`(async () => {
       const input = document.getElementById('search');
-      input.value = '第 一';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 400));
-      const multi = document.querySelectorAll('#grid .card').length;
-      input.value = '';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 300));
-      return [multi >= 0, document.querySelectorAll('#grid .card').length > 0].join('|');
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const count = async (q) => {
+        input.value = q;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await wait(400);
+        return document.querySelectorAll('#grid .card').length;
+      };
+      // 从真实数据取一个纯中文标题，避免硬编码词在未来季度数据里消失
+      const pool = (window.ANIME_DATA || []).filter(function (x) {
+        return x && typeof x.t === 'string' && x.t.replace(/[^\\u4e00-\\u9fa5]/g, '').length >= 4;
+      });
+      const title = (pool[0] ? pool[0].t : '').replace(/[^\\u4e00-\\u9fa5]/g, '');
+      const q1 = title.slice(0, 2);
+      const q2 = title.slice(2, 4);
+      const single = await count(q1);
+      const multi = await count(q1 + ' ' + q2);
+      await count('');
+      return [single > 0, multi > 0, multi <= single, document.querySelectorAll('#grid .card').length > 0].join('|');
     })()`);
-    check('多关键词搜索在分词预计算后仍稳定', searchStable === 'true|true', searchStable);
+    check('多关键词交集非空且不多于单关键词', searchStable === 'true|true|true|true', searchStable);
 
     // ④ 离线提示条内置重试按钮：离线时提示联网，联网后收起并触发加载
     const offlineRetry = await cdp.evaluate(`(() => {
@@ -3318,6 +3332,15 @@ async function main() {
       return [sel.value, /看板仅在我的番剧可用/.test(msg)].join('|');
     })()`);
     check('看板视图切 Tab 回退有解释', tabFallback === 'grid|true', tabFallback);
+
+    // 交互全程的 JS 异常复查：上面只快照了首屏，150 余项交互期间的异常此前完全漏检
+    const lateErrors = cdp.events.filter(
+      (e) =>
+        e.method === 'Runtime.exceptionThrown' ||
+        (e.method === 'Runtime.consoleAPICalled' && e.params?.type === 'error'),
+    );
+    check('交互过程无新增 JS 异常', lateErrors.length === jsErrors.length,
+      lateErrors.length === jsErrors.length ? '' : String(lateErrors[lateErrors.length - 1].method));
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");

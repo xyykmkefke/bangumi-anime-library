@@ -358,12 +358,18 @@ async function main() {
     await cdp.send('Page.enable');
 
     // 等待渲染与全库补齐
+    let firstReady = false;
     for (let i = 0; i < 80; i += 1) {
       try {
-        if (await cdp.evaluate('document.querySelectorAll(".card").length > 0 && window.__FULL_DATA_READY === true')) break;
+        if (await cdp.evaluate('document.querySelectorAll(".card").length > 0 && window.__FULL_DATA_READY === true')) {
+          firstReady = true;
+          break;
+        }
       } catch {}
       await sleep(250);
     }
+    // 页面没就绪时继续审计只会得到空 DOM 的"全绿"，必须当作硬失败
+    if (!firstReady) throw new Error('页面未就绪（20s 内 __FULL_DATA_READY 未置位），审计结果不可信');
 
     // 预置 3 种追番状态（doing/done/drop），让看板与状态徽章参与审计
     await cdp.evaluate(`(function(){
@@ -417,6 +423,12 @@ async function main() {
           try { await cdp.evaluate(st.cleanup); } catch {}
           await sleep(250);
         }
+        // setup 是空操作（弹窗没打开、容器被藏）时审计的是背景页，会给出假通过
+        if (!res || !(res.total > 0)) {
+          failedStates += 1;
+          console.log(`  [失败] ${st.name}：该状态没有可审计文本（setup 可能未生效）`);
+          continue;
+        }
         if (res) {
           totalText += res.total;
           for (const it of res.items) allItems.push({ state: st.name, ...it });
@@ -430,6 +442,11 @@ async function main() {
         if (seen.has(key)) continue;
         seen.add(key);
         uniq.push(it);
+      }
+      // 覆盖量下限：正常页面两套主题都在 1000+ 文本实例，骤降说明渲染或审计逻辑坏了
+      if (totalText < 500) {
+        failedStates += 1;
+        console.log(`  [失败] ${theme} 主题仅覆盖 ${totalText} 处文本，低于下限 500，结论不可信`);
       }
       report[theme] = { totalText, issues: uniq };
     }
