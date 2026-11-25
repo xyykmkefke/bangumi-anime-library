@@ -3215,6 +3215,99 @@ async function main() {
     check('云同步冲突时重新合并而非覆盖', condState.gets >= 2 && condState.status === 'drop', condOut);
     await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: condMock.result.identifier });
 
+    // 墓碑比较必须取「远端与本地墓碑的较大者」：早先用 `||` 时，远端那条更旧的墓碑
+    // 会短路掉本地更新的删除，导致刚删掉的条目被判定为「删除早于远端修改」而复活
+    const tombState = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_my_anime_v1';
+      const DEL = 'yuc_deleted_v1';
+      const now = Date.now();
+      const id = '990000123';
+      // 本地 20 秒前删除；远端带着 60 秒前（更旧）的墓碑，且条目 30 秒前被改过
+      localStorage.setItem(DEL, JSON.stringify({ [id]: now - 20000 }));
+      localStorage.setItem(KEY, '{}');
+      return { id, localTomb: now - 20000, remoteTomb: now - 60000, remoteU: now - 30000 };
+    })()`);
+    const tombMock = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const mk = (payload) => ({ ok: true, status: 200, json: async () => payload,
+          text: async () => JSON.stringify(payload), headers: { get: () => null } });
+        const st = ${JSON.stringify(tombState)};
+        const orig = window.fetch;
+        window.fetch = async (url, opts) => {
+          const u = String(url);
+          if (u.indexOf('api.github.com') >= 0) {
+            const method = (opts && opts.method) || 'GET';
+            if (method === 'GET') {
+              return mk({ id: 'abc', updated_at: '2020-01-01T00:00:00Z',
+                files: { 'yuc-anime-list.json': { content: JSON.stringify({
+                  app: 'yuc-anime-list', version: 3,
+                  items: [{ id: Number(st.id), status: 'doing', addedAt: st.remoteU, ep: 3, updatedAt: st.remoteU }],
+                  deleted: { [String(st.id)]: st.remoteTomb }
+                }) } } });
+            }
+            return mk({ id: 'abc', updated_at: '2020-01-01T00:00:01Z' });
+          }
+          return orig(url, opts);
+        };
+        localStorage.setItem('yuc_gist_v1', JSON.stringify({ token: 'x', gistId: 'abc' }));
+      })();`,
+    });
+    await cdp.send('Page.reload');
+    await sleep(2200);
+    const tombAfter = await cdp.evaluate(`(() => {
+      let map = {}, del = {};
+      try { map = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}'); } catch (e) {}
+      try { del = JSON.parse(localStorage.getItem('yuc_deleted_v1') || '{}'); } catch (e) {}
+      const st = ${JSON.stringify(tombState)};
+      return { revived: !!map[st.id], tombKept: !!del[st.id] };
+    })()`);
+    check('较旧的远端墓碑不会让刚删除的条目复活', !tombAfter.revived, tombAfter);
+    await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: tombMock.result.identifier });
+
+    // 断开同步后，在途请求不得把 Token 写回磁盘
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const orig = window.fetch;
+        window.fetch = (url, opts) => {
+          const u = String(url);
+          if (u.indexOf('api.github.com') >= 0) {
+            // 故意拖慢，模拟「同步进行中断开」
+            return new Promise((resolve) => setTimeout(() => resolve({
+              ok: true, status: 200,
+              json: async () => ({ id: 'abc', updated_at: '2020-01-01T00:00:00Z',
+                files: { 'yuc-anime-list.json': { content: '{"items":[],"deleted":{}}' } } }),
+              text: async () => '{"items":[],"deleted":{}}',
+              headers: { get: () => null }
+            }), 1500));
+          }
+          return orig(url, opts);
+        };
+        localStorage.setItem('yuc_gist_v1', JSON.stringify({ token: 'ghp_secret_probe', gistId: 'abc' }));
+      })();`,
+    });
+    await cdp.send('Page.reload');
+    // 必须等同步真正开始再断开：启动后 1.2s 才第一次 syncNow，
+    // 若在此之前断开，loadSyncCfg 读到的是空配置、根本不会发起请求，
+    // 旧代码也能"通过"，断言就成了摆设。这里留到 2s 确保请求已在途
+    await sleep(2000);
+    const epochOut = await cdp.evaluate(`(async () => {
+      const btn = document.getElementById('syncDisconnectBtn');
+      window.confirm = () => true;
+      const startedAt = Date.now();
+      if (btn) btn.click();
+      const clearedImmediately = !localStorage.getItem('yuc_gist_v1');
+      // 等足够长：mock 的 fetch 延迟 1.5s，整条链路（pull→merge→push）会连发两次，
+      // 只看 3s 容易在第一次回写之前就判定通过，必须覆盖到 push 完成后的那次回写
+      await new Promise((r) => setTimeout(r, 6000));
+      const stillClear = !localStorage.getItem('yuc_gist_v1');
+      const raw = localStorage.getItem('yuc_gist_v1') || '';
+      return { clearedImmediately, stillClear, leaked: raw.indexOf('ghp_secret_probe') >= 0,
+               elapsed: Date.now() - startedAt };
+    })()`);
+    check('断开同步后 Token 立即清除', epochOut.clearedImmediately, epochOut);
+    check('断开同步后在途请求不把 Token 写回', epochOut.stillClear && !epochOut.leaked, epochOut);
+    await cdp.evaluate("localStorage.removeItem('yuc_gist_v1')");
+
     // 冷启动深链：首屏轻量数据只有最近一年，指向旧番的 d 参数应在全库补齐后打开
     await cdp.evaluate("localStorage.removeItem('yuc_gist_v1')");
     // 从构建产物里取一个确定不在首屏年份内的旧番，避免依赖页面当前加载阶段
@@ -3374,6 +3467,77 @@ async function main() {
       return msg;
     })()`);
     check('集数超界给出上限提示', /已限制为/.test(epToast), epToast);
+
+    // ⑦之二 清空/非法输入不清零已有进度（Number('') 是 0，曾被当成"用户想看 0 话"）
+    // 注意读 localStorage 而不是输入框：render() 走增量同步时输入框节点会被复用，
+    // 里面仍是刚才写入的空串，只有落盘的数据才能反映真实结果
+    const epKeep = await cdp.evaluate(`(async () => {
+      document.querySelectorAll('.tab')[1].click();
+      await new Promise((r) => setTimeout(r, 400));
+      const input = document.querySelector('#grid .card .epin');
+      if (!input) return { skip: true };
+      const id = input.closest('.card').dataset.id;
+      const readEp = () => {
+        try { return (JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[id] || {}).ep; } catch (e) { return 'err'; }
+      };
+      const before = readEp();
+      input.value = '';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const afterClear = readEp();
+      input.value = 'abc';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const afterJunk = readEp();
+      return { before, afterClear, afterJunk, ok: before === afterClear && before === afterJunk };
+    })()`);
+    if (!epKeep.skip) check('清空或乱填集数不清零已有进度', epKeep.ok, `${epKeep.before} → 清空后 ${epKeep.afterClear} / 乱填后 ${epKeep.afterJunk}`);
+
+    // ⑦之三 清单损坏时进入只读保护：必须刷新页面才能触发 loadMine，再验证不被空清单覆盖
+    await cdp.evaluate(`(() => {
+      localStorage.setItem('yuc_my_anime_v1', '{"1234":{"s":"done"');  // 故意截断
+      return true;
+    })()`);
+    await cdp.send('Page.reload');
+    await sleep(1500);
+    const corruptGuard = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_my_anime_v1';
+      const before = localStorage.getItem(KEY);
+      const backed = localStorage.getItem(KEY + '_broken');
+      const warn = document.getElementById('storageWarn');
+      const warnShown = !!(warn && !warn.hidden);
+      // 切回「全部番剧」才有卡片可点（损坏时默认落在空的"我的番剧"上）
+      const tabs = document.querySelectorAll('.tab');
+      if (tabs[0]) tabs[0].click();
+      await new Promise((r) => setTimeout(r, 500));
+      const cards = document.querySelectorAll('#grid .card');
+      let clicked = 0;
+      for (const c of cards) {
+        const t = c.querySelector('[data-act="toggle"]');
+        if (t && t.textContent.indexOf('加入') >= 0) { t.click(); clicked += 1; break; }
+      }
+      if (!clicked && cards.length) {
+        // 兜底：直接点第一张卡的 toggle，不论文案
+        const t = cards[0].querySelector('[data-act="toggle"]');
+        if (t) { t.click(); clicked = 1; }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+      const after = localStorage.getItem(KEY);
+      return { preserved: after === before, hasBackup: !!backed && backed.length > 0, warnShown,
+               clicked, cardCount: cards.length,
+               afterLen: (after || '').length, beforeLen: (before || '').length };
+    })()`);
+    check("清单解析失败时不覆盖原始数据", corruptGuard.preserved, JSON.stringify(corruptGuard));
+    check('清单解析失败时保留原始数据副本', corruptGuard.hasBackup, corruptGuard);
+    check('清单解析失败时给出常驻提示', corruptGuard.warnShown, corruptGuard);
+    // 收尾：清掉损坏数据，避免污染后续断言
+    await cdp.evaluate(`(() => {
+      localStorage.removeItem('yuc_my_anime_v1');
+      localStorage.removeItem('yuc_my_anime_v1_broken');
+      return true;
+    })()`);
+    await cdp.send('Page.reload');
+    await sleep(1200);
 
     // ⑧ 看板视图切到全部番剧回退网格时给出解释
     const tabFallback = await cdp.evaluate(`(async () => {

@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.19">
+<meta name="version" content="1.6.20">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.19</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.20</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2735,6 +2735,9 @@
   };
   var bulkSel = Object.create(null);
 
+  // 清单解析失败的标记。必须在 loadMine() 调用之前声明：
+  // 用 var 虽不会报错，但声明在调用之后会让 loadMine 里的赋值被随后的初始化覆盖回 false
+  var mineCorrupt = false;
   var myMap = loadMine();
   var myDeleted = loadDeleted();
   // 清单版本号：每次写入递增，供筛选结果缓存判断是否需要重算
@@ -2782,12 +2785,14 @@
     return { s: 'done', t: Number(v) || Date.now(), ep: 0, u: Number(v) || Date.now() };
   }
 
+  // 解析失败与「本来就没有数据」必须区分：前者若被当成空清单，
+  // 用户随便加一部就会用空对象覆盖掉损坏但可抢救的原始字符串，数据永久丢失
   function loadMine() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return {};
       var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return {};
+      if (!parsed || typeof parsed !== 'object') { mineCorrupt = true; return {}; }
       var out = {};
       Object.keys(parsed).forEach(function (id) {
         // 只接受数字 ID，避免异常键（如 __proto__）污染对象原型
@@ -2797,6 +2802,9 @@
       });
       return out;
     } catch (e) {
+      // 保留原件备查，并进入只读保护（见 saveMine），避免被空清单覆盖
+      mineCorrupt = true;
+      try { localStorage.setItem(STORAGE_KEY + '_broken', String(localStorage.getItem(STORAGE_KEY) || '')); } catch (e2) {}
       return {};
     }
   }
@@ -2828,7 +2836,12 @@
   }
 
   function markDeleted(id) {
-    myDeleted[id] = Date.now();
+    // 墓碑时间必须大于该条目自己的更新时间：各设备的 Date.now() 有偏差，
+    // 若另一台时钟偏快、把 u 写成了"未来"时间，用纯本地时间做墓碑会永远小于它，
+    // 导致每次同步都被判定为"删除发生在修改之前"而复活，真实时间追上之前删不掉
+    var cur = myMap[id];
+    var floor = Math.max(Date.now(), (cur && (Number(cur.u) || Number(cur.t) || 0)) || 0);
+    myDeleted[id] = floor + 1;
     persistDeleted();
   }
 
@@ -2840,6 +2853,15 @@
 
   function saveMine(opts) {
     mapRev += 1;
+    // 原始数据解析失败时禁止落盘：内存里的空清单会覆盖掉可抢救的原件
+    if (mineCorrupt) {
+      var warnEl = $('storageWarn');
+      if (warnEl) {
+        warnEl.hidden = false;
+        warnEl.textContent = '本地清单读取失败，改动暂不保存（原件已备份到浏览器存储）。请导出备份后重新导入。';
+      }
+      return false;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
     } catch (e) {
@@ -3877,7 +3899,9 @@
         ids.forEach(function (id) {
           if (!snapshot[id]) delete myMap[id];
         });
-        saveMine();
+        // saveMine 返回 false 表示没写进磁盘（配额满、隐私模式、清单损坏）：
+        // 此时若照常说"已撤销"，用户会以为改动已保存，刷新后才发现丢了
+        if (!saveMine()) return;
         render();
         toast('已撤销批量操作');
       }
@@ -4430,7 +4454,14 @@
     if (!item || !entry) return;
     var total = Number(item.e) || 0;
     var cap = total > 0 ? total : 9999;
-    var raw = Math.round(Number(value) || 0);
+    // 输入非法（清空、粘贴"12话"、误触字母）时保持原值：Number('') 与 Number('abc') 都是 NaN，
+    // 若按 `|| 0` 兜底会把它当成"用户想看 0 话"，进而把进度清零并把状态从看完降级为在看
+    var num = Number(value);
+    if (String(value).trim() === '' || !isFinite(num)) {
+      render();
+      return;
+    }
+    var raw = Math.round(num);
     var next = Math.max(0, Math.min(cap, raw));
     // 超界输入此前会被静默截断，用户以为没生效；明确告知上限
     if (raw > cap) toast('已限制为 ' + cap + ' 话');
@@ -4967,7 +4998,14 @@
     var start = gridEl.querySelectorAll('.card').length;
     var next = list.slice(start, start + PAGE_SIZE);
     if (!next.length) { updateLoadMore(list.length, start, false); return; }
-    gridEl.insertAdjacentHTML('beforeend', next.map(cardHtml).join(''));
+    // 与 syncCards 使用同一套签名：节点挂载后 outerHTML 会被 onload 改写，
+    // 必须在插入前记录原始模板，否则下次 render 时这些卡片认不出自己、只能删掉重建
+    var batch = document.createElement('div');
+    batch.innerHTML = next.map(cardHtml).join('');
+    [].slice.call(batch.children).forEach(function (el) {
+      if (!el.getAttribute('data-sig')) el.setAttribute('data-sig', el.outerHTML);
+      gridEl.appendChild(el);
+    });
     // 记住已展开的条数，后续 render（改状态、加入/移出等）不会缩回第一批
     state.limit = start + next.length;
     // 新插入的卡片沿用 roving tabindex：只有首张进入 Tab 序列
@@ -5303,6 +5341,10 @@
     clearTimeout(pressTimer);
     pressOrigin = { x: e.clientX, y: e.clientY };
     pressTimer = setTimeout(function () {
+      // 这 600ms 内可能发生重绘（云同步完成、其他标签页改动、后台渲染），
+      // 旧节点会脱离文档；此时 getBoundingClientRect 全为 0 会让菜单弹到左上角，
+      // 而 suppressClick 已置真，还会连带吞掉下一次正常点击
+      if (!document.contains(card)) { pressOrigin = null; return; }
       lastLongPress = Date.now();
       suppressClick = true;
       pressOrigin = null;
@@ -5922,7 +5964,13 @@
     }
   }
 
-  function saveSyncCfg(cfg) {
+  // 配置世代号：用户断开同步或重配时递增。在途的同步请求持有旧世代号，
+  // 回来时若与当前不符就丢弃回写——否则「断开」后成功的请求会把 Token 原样写回磁盘，
+  // 让用户以为令牌已清除，实际下一个人打开页面仍能用它同步
+  var cfgEpoch = 0;
+
+  function saveSyncCfg(cfg, epoch) {
+    if (epoch != null && epoch !== cfgEpoch) return;
     syncCfg = cfg || {};
     if (!canStore) return;
     try {
@@ -6071,6 +6119,14 @@
       var file = g.files && g.files[GIST_FILE];
       if (!file) return null;
       if (file.truncated && file.raw_url) {
+        // raw_url 来自 Gist API 响应体，属于外部可控输入；这里的请求会带上 Bearer Token，
+        // 必须校验主机，否则粘贴一个指向他处的 Gist 就能把令牌发到任意主机。
+        // 目前 CSP 的 connect-src 白名单能兜住，但那是配置层面的，放宽时不会有任何提示
+        var rawHost = '';
+        try { rawHost = new URL(file.raw_url).hostname; } catch (e) { rawHost = ''; }
+        if (rawHost !== 'gist.githubusercontent.com' && rawHost !== 'raw.githubusercontent.com') {
+          throw new Error('Gist 内容地址异常，已中止以保护令牌');
+        }
         return fetchWithTimeout(file.raw_url, { headers: { Authorization: 'Bearer ' + cfg.token } }, 20000)
           .then(function (r) {
             if (!r.ok) throw new Error('读取 Gist 内容失败');
@@ -6080,11 +6136,14 @@
       }
       return parsePayload(file.content);
     }).catch(function (err) {
-      // Gist 被删掉时重新创建，不阻断同步
+      // 只有「本来就没有 Gist ID」才自动创建。已有 ID 却收到 404，
+      // 可能是 ID 写错、Token 属于别的账号、或 Gist 真被删掉——三种情况 GitHub 都返 404，
+      // 一律静默新建会让两台设备各写一个 Gist 且各自显示"同步成功"，属于沉默的数据分叉
       if (err && err.code === 404) {
-        cfg.gistId = '';
-        saveSyncCfg(cfg);
-        return null;
+        if (!cfg.gistId) return null;
+        var e404 = new Error('Gist 不存在：可能已删除或 ID 有误，请到设置里核对');
+        e404.code = 404;
+        throw e404;
       }
       throw err;
     });
@@ -6094,7 +6153,7 @@
     return gistRequest(cfg, 'POST', '/gists', body).then(function (g) {
       cfg.gistId = g.id;
       syncStamp = { etag: g.__etag || '', updatedAt: g.updated_at || '' };
-      saveSyncCfg(cfg);
+      saveSyncCfg(cfg, cfg.__epoch);
       return g;
     });
   }
@@ -6122,7 +6181,11 @@
     var path = '/gists/' + encodeURIComponent(cfg.gistId);
     // 条件写入：先确认远端自上次拉取后没被别的设备改过，避免直接覆盖对方的改动
     return gistRequest(cfg, 'GET', path).then(function (g) {
-      if (attempt < 3 && syncStamp.updatedAt && g.updated_at && g.updated_at !== syncStamp.updatedAt) {
+      // 远端自上次拉取后被改过：重新合并再推。注意这里不能用 `attempt < 3 &&` 短路——
+      // attempt 到上限时若跳过检查，If-Match 用的就是刚刚 GET 到的最新 ETag，永远命中，
+      // 条件写入形同虚设，会用旧 payload 把对方这期间的改动直接覆盖掉
+      if (syncStamp.updatedAt && g.updated_at && g.updated_at !== syncStamp.updatedAt) {
+        if (attempt >= 3) throw new Error('远端频繁变更，请稍后重试');
         return gistRepush(cfg, attempt);
       }
       var extra = null;
@@ -6143,7 +6206,7 @@
       if (g && g.id) {
         cfg.gistId = g.id;
         syncStamp = { etag: g.__etag || syncStamp.etag, updatedAt: g.updated_at || '' };
-        saveSyncCfg(cfg);
+        saveSyncCfg(cfg, cfg.__epoch);
       }
       return g;
     });
@@ -6185,7 +6248,9 @@
         ep: Math.max(0, Math.round(Number(it.ep) || 0)),
         u: Number(it.updatedAt) || Number(it.addedAt) || 0
       };
-      var tomb = Number(remoteDeleted[id]) || Number(myDeleted[id]) || 0;
+      // 取远端与本地墓碑的较大者：若用 `||`，远端那条更旧的墓碑会短路掉本地更新的删除，
+      // 使刚删掉的条目被判定为「删除早于远端修改」而复活（下方 6216 处的同类逻辑用的就是 max）
+      var tomb = Math.max(Number(remoteDeleted[id]) || 0, Number(myDeleted[id]) || 0);
       if (tomb && tomb >= r.u) return;
       var l = myMap[id];
       if (!l) {
@@ -6242,9 +6307,12 @@
       syncQueued = true;
       return Promise.resolve(false);
     }
+    var epoch = cfgEpoch;
+    cfg.__epoch = epoch;
     syncBusy = true;
     setSyncStatus('同步中…', '');
     return gistPull(cfg).then(function (remote) {
+      if (epoch !== cfgEpoch) return null;
       var changed = mergeRemote(remote);
       if (changed) {
         saveMine({ fromSync: true });
@@ -6252,9 +6320,11 @@
       }
       return gistPush(cfg, buildPayload());
     }).then(function () {
+      // 用户在同步途中断开了：不写盘、不改状态，避免把旧配置连同 Token 复活
+      if (epoch !== cfgEpoch) return false;
       clearSyncRetry();
       cfg.lastSync = Date.now();
-      saveSyncCfg(cfg);
+      saveSyncCfg(cfg, epoch);
       markBackup();
       setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
       if (!silent) toast('云同步完成');
@@ -6301,6 +6371,8 @@
   $('syncDisconnectBtn').addEventListener('click', function () {
     if (!confirm('断开云同步？已保存的 Gist 不会被删除。')) return;
     clearSyncRetry();
+    // 递增世代号，让在途请求的回写失效；否则它们成功返回后会把 Token 又写回磁盘
+    cfgEpoch += 1;
     try { localStorage.removeItem(GIST_KEY); } catch (e) { /* 忽略 */ }
     syncCfg = {};
     $('gistToken').value = '';
@@ -6451,6 +6523,21 @@
     var keepY = window.scrollY;
     adoptData();
     fillFilterOptions();
+    // 全库到达后校正进度状态：合并时若还只有首屏数据，旧番取不到总话数，
+    // 「已追平」无法判定为看完；这里统一补一次，避免同一份数据因合并时机不同而状态不一致
+    var epFixed = 0;
+    Object.keys(myMap).forEach(function (mid) {
+      var ent = myMap[mid];
+      var it = byId.get(mid);
+      if (!ent || !it) return;
+      var tot = Number(it.e) || 0;
+      if (tot > 0 && (Number(ent.ep) || 0) >= tot && ent.s !== 'done') {
+        ent.s = 'done';
+        ent.u = Date.now();
+        epFixed += 1;
+      }
+    });
+    if (epFixed) saveMine();
     syncControls();
     render();
     window.scrollTo(0, keepY);
@@ -6594,6 +6681,15 @@
   }
   if (!canStore) {
     $('storageWarn').hidden = false;
+  }
+  // 清单解析失败时立刻常驻提示：用户一进页面就该知道当前清单读不出来，
+  // 而不是等到某次写入被拦下才看到（那时可能已经以为空清单是真实状态）
+  if (mineCorrupt) {
+    var warnBoot = $('storageWarn');
+    if (warnBoot) {
+      warnBoot.hidden = false;
+      warnBoot.textContent = '本地清单读取失败，改动暂不保存（原件已备份到浏览器存储）。请导出备份后重新导入。';
+    }
   }
   // 已配置云同步时，启动后自动与 Gist 合并一次
   syncCfg = loadSyncCfg();
