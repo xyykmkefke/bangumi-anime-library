@@ -96,6 +96,8 @@ function createCdp(ws) {
   let seq = 0;
   const pending = new Map();
   const events = [];
+  // 实时事件钩子：Fetch.requestPaused 这类必须"立刻回包"的事件不能等轮询
+  const listeners = [];
 
   // CDP 请求超时：CI 慢网络/页面脚本挂起时避免永久等待
   const TIMEOUT_MS = 20000;
@@ -120,6 +122,7 @@ function createCdp(ws) {
       return;
     }
     if (msg.method) events.push(msg);
+    if (msg.method) listeners.forEach((fn) => { try { fn(msg); } catch {} });
   };
 
   const send = (method, params = {}) =>
@@ -151,7 +154,7 @@ function createCdp(ws) {
     return res.result?.result?.value;
   };
 
-  return { send, evaluate, events };
+  return { send, evaluate, events, listeners };
 }
 
 const results = [];
@@ -3593,6 +3596,59 @@ async function main() {
       }, 400));
     })()`);
     check('其他标签页的改动按时间戳合并', crossTab === 'true|done|5', crossTab);
+
+    // ---- 全库数据：主源顺序 + 双份缓存清理 ----
+    // 主源必须是实测更快的 cdn.jsdelivr.net。第二个源延后 1.2s 才发起，只有主源在 1.2s 内
+    // 完成并置 fullReady，备份源才会被 startOne 开头的 `if (applying || fullReady) return` 拦掉。
+    // 顺序反了（曾经是 gcore 在前）会让 5~9s 的慢源占主位、0.7s 的快源被推迟 1.2s，
+    // 结果两边都下完：多一倍流量，SW 缓存里还多存一份 2.5MB。
+    const orderSrc = await readFile(path.join(ROOT, 'index.html'), 'utf8');
+    const fnStart = orderSrc.indexOf('function fullDataSources');
+    const fnEnd = orderSrc.indexOf('function applyFullData');
+    const fnBody = fnStart >= 0 && fnEnd > fnStart ? orderSrc.slice(fnStart, fnEnd) : '';
+    const posPrimary = fnBody.indexOf('//cdn.jsdelivr.net/');
+    const posBackup = fnBody.indexOf('//gcore.jsdelivr.net/');
+    check(
+      '全库数据主源为 cdn.jsdelivr.net（快源优先）',
+      fnBody !== '' && posPrimary >= 0 && posBackup >= 0 && posPrimary < posBackup,
+      `cdn@${posPrimary} gcore@${posBackup}`,
+    );
+
+    // sw.js 的双份数据清理：两个 CDN 都落过盘时只留主源那份（约省 2.5MB）；
+    // 但若只剩备用源那份必须保留——那是该网络环境下唯一的离线副本，删了就再也离线不了。
+    const dedupe = await cdp.evaluate(`(async () => {
+      // 以普通脚本加载 sw.js：self 即 window，只定义函数与监听器，不会真的注册 SW
+      if (typeof dropDuplicateData !== 'function') {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'sw.js?dedupe=' + Date.now();
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+      if (typeof dropDuplicateData !== 'function') return 'no-fn';
+      const NAME = 'yuc-test-dedupe';
+      const mk = (host) => 'https://' + host + '/gh/x/y@v1/data/anime-data.js?v=1';
+      async function run(urls) {
+        await caches.delete(NAME);
+        const cache = await caches.open(NAME);
+        for (const u of urls) await cache.put(new Request(u), new Response('x'));
+        await dropDuplicateData(cache);
+        const keys = await cache.keys();
+        return keys.map((k) => new URL(k.url).hostname).sort().join(',');
+      }
+      const both = await run([mk('gcore.jsdelivr.net'), mk('cdn.jsdelivr.net')]);
+      const onlyBackup = await run([mk('gcore.jsdelivr.net')]);
+      const onlyPrimary = await run([mk('cdn.jsdelivr.net')]);
+      await caches.delete(NAME);
+      return [both, onlyBackup, onlyPrimary].join('|');
+    })()`);
+    check(
+      '双份全库数据只保留主源副本',
+      dedupe === 'cdn.jsdelivr.net|gcore.jsdelivr.net|cdn.jsdelivr.net',
+      dedupe,
+    );
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");

@@ -1,6 +1,6 @@
 // 应用壳离线缓存：页面网络优先并带超时回退，其余同源资源缓存优先、后台更新
 // 壳缓存随版本升级整体替换；封面单独放一个长期缓存，发版不再清空已下载的图片
-var CACHE = 'yuc-anime-shell-v29';
+var CACHE = 'yuc-anime-shell-v30';
 var IMG_CACHE = 'yuc-anime-images-v1';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js'];
 var IMG_LIMIT = 500;
@@ -14,6 +14,23 @@ function trimImageCache(cache) {
     if (keys.length <= IMG_LIMIT) return null;
     var drop = keys.slice(0, keys.length - IMG_LIMIT);
     return Promise.all(drop.map(function (req) { return cache.delete(req); }));
+  }).catch(function () {});
+}
+
+// 全库数据去重：两个 CDN 都下载过时，缓存里会留两份 anime-data.js（约 5MB）。
+// 应用永远优先用 PRIMARY_DATA_HOST 那份，所以只要它在，其余同文件副本都是纯占地方。
+// 只删"另一主机"的副本、且仅当主源存在——若用户网络只能通备用源，那份是唯一的离线副本，必须留着。
+var PRIMARY_DATA_HOST = 'cdn.jsdelivr.net';
+function dropDuplicateData(cache) {
+  return cache.keys().then(function (keys) {
+    var dataKeys = keys.filter(function (req) { return req.url.indexOf('anime-data.js') >= 0; });
+    if (dataKeys.length < 2) return null;
+    var hostOf = function (req) { return new URL(req.url).hostname; };
+    var hasPrimary = dataKeys.some(function (req) { return hostOf(req) === PRIMARY_DATA_HOST; });
+    if (!hasPrimary) return null;
+    return Promise.all(dataKeys.filter(function (req) {
+      return hostOf(req) !== PRIMARY_DATA_HOST;
+    }).map(function (req) { return cache.delete(req); }));
   }).catch(function () {});
 }
 
@@ -47,6 +64,9 @@ self.addEventListener('activate', function (e) {
         if (key.indexOf('yuc-anime-') !== 0) return null;
         return caches.delete(key);
       }));
+    }).then(function () {
+      // 清掉历史遗留的双份全库数据（一次约 2.5MB），只保留应用实际使用的那份
+      return caches.open(CACHE).then(dropDuplicateData).catch(function () {});
     }).then(function () {
       return self.clients.claim();
     })

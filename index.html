@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.20">
+<meta name="version" content="1.6.21">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.20</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.21</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -6496,8 +6496,11 @@
       });
   }
 
-  // 首屏之后补齐完整数据：两个 jsDelivr CDN 并行竞速（先到先用），全部失败再回退本站
+  // 首屏之后补齐完整数据：两个 jsDelivr CDN 竞速（先到先用），全部失败再回退本站
   var fullState = fullReady ? 'ready' : 'idle';
+  // 单个 CDN 的等待上限（从该源发起时开始计时，不是全程总时长）
+  // 实测本机 cdn.jsdelivr.net 约 0.7s、gcore 约 5~9s，所以主源是前者、后者只作慢网兜底；
+  // 这里不能调低到 4s 以内——那会让 gcore 永远超时，等于把唯一的备用源废掉
   var FULL_CDN_TIMEOUT = 6000;
   var FULL_ORIGIN_TIMEOUT = 10000;
 
@@ -6509,9 +6512,13 @@
     var ver = verEl ? verEl.getAttribute('content') : '';
     var repo = 'gh/xyykmkefke/bangumi-anime-library@' + (ver ? 'v' + ver : 'main') + '/data/anime-data.js';
     var suffix = META.generatedAt ? '?v=' + encodeURIComponent(META.generatedAt) : '';
+    // 顺序即优先级：第一个立即请求、第二个延后 1.2s。
+    // 必须把实测更快的 cdn.jsdelivr.net 放第一位——它通常 1s 内返回并置 fullReady，
+    // 备份源到此直接 return，第二个请求根本不会发出（一个源 = 一份 2.5MB 流量与缓存）。
+    // 反过来放（曾经如此）会让慢源占主位、快源被推迟 1.2s，两边都下完，流量与缓存双倍。
     return [
-      'https://gcore.jsdelivr.net/' + repo + suffix,
       'https://cdn.jsdelivr.net/' + repo + suffix,
+      'https://gcore.jsdelivr.net/' + repo + suffix,
       'data/anime-data.js'
     ];
   }
@@ -6609,6 +6616,10 @@
         if (settled || fullReady) return;
         settled = true;
         s.onload = s.onerror = null;
+        // 注意：移除 script 只放弃等待，不会中止已发出的请求，剩下的字节仍会下完
+        // （实测移除后照样收到完整 2523KB；只有 fetch + AbortController 能真中断，
+        //  但 CSP 未开 unsafe-eval，取回的文本无法执行）。所以省流量只能靠"不发这个请求"，
+        //  也就是让更快的源排第一位、在 1.2s 内触发 fullReady——见 fullDataSources 的注释。
         if (s.parentNode) s.parentNode.removeChild(s);
         pending -= 1;
         if (!pending) tryOriginSource();
