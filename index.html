@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.22">
+<meta name="version" content="1.6.23">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.22</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.23</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -6498,9 +6498,12 @@
 
   // 首屏之后补齐完整数据：全库数据按源顺序串行回退，全部失败再回退本站
   var fullState = fullReady ? 'ready' : 'idle';
-  // 单个源的等待上限。真实冷启动下 2.58MB 需要 1~4s，留 6s 让慢网也能下完；
-  // 调低会让正常慢网被误判为失败，反而触发下一个源、多下一份。
-  var FULL_CDN_TIMEOUT = 6000;
+  // 单个源的等待上限。它只决定"何时开始试下一个源"，不再决定"要不要这份数据"——
+  // 超时后原请求继续跑、下完了照样采用（见 raceFullSources 注释）。
+  // 取值依据：真实冷启动实测 950/1165/1401/2008/2150/2598/4163/5274/12696ms，
+  // 15s 覆盖到尾部，既不会把"慢但能下完"误判成失败而多下一份，worst case 也还能接受
+  // （15 + 15 + 同源 10）。硬失败由 onerror 立刻返回，不靠这个超时。
+  var FULL_CDN_TIMEOUT = 15000;
   var FULL_ORIGIN_TIMEOUT = 10000;
 
   function fullDataSources() {
@@ -6614,14 +6617,14 @@
       var src = cdn[idx];
       idx += 1;
       var s = document.createElement('script');
-      var settled = false;
+      var timedOut = false;
       var timer = setTimeout(function () {
-        if (settled || fullReady) return;
-        settled = true;
-        s.onload = s.onerror = null;
-        // 移除 script 只放弃等待，不会中止已发出的请求（实测移除后仍收完 2523KB）。
-        // 这里真正的收益是"下一个源晚 6s 才发"，不会与当前这个重叠。
-        if (s.parentNode) s.parentNode.removeChild(s);
+        if (fullReady) return;
+        timedOut = true;
+        // 关键：不摘掉 onload、也不移除 script 节点。
+        // 实测移除节点后脚本不会再执行（数据永远拿不到），而请求本身照样在后台下完。
+        // 所以慢源不是"丢弃"，而是"降级为后台继续等"：它下完了照样能救场，
+        // 只是此刻先让下一个源顶上，避免用户干等到 12s。
         attempt();
       }, FULL_CDN_TIMEOUT);
       s.async = true;
@@ -6629,17 +6632,15 @@
       s.crossOrigin = 'anonymous';
       s.src = src;
       s.onload = function () {
-        if (settled || fullReady) return;
-        settled = true;
         clearTimeout(timer);
+        if (fullReady) return;
         if ((window.ANIME_DATA || []).length > DATA.length) { applyFullData(); return; }
         // 脚本加载了但数据没变多（例如 CDN 返回了错误页），当作这个源不可用
-        attempt();
+        if (!timedOut) attempt();
       };
       s.onerror = function () {
-        if (settled || fullReady) return;
-        settled = true;
         clearTimeout(timer);
+        if (fullReady || timedOut) return;
         attempt();
       };
       document.head.appendChild(s);

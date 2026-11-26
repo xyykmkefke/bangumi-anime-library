@@ -3597,7 +3597,7 @@ async function main() {
     })()`);
     check('其他标签页的改动按时间戳合并', crossTab === 'true|done|5', crossTab);
 
-    // ---- 全库数据：串行回退 + 双份缓存清理 ----
+    // ---- 全库数据：串行回退 + 超时不弃数据 + 双份缓存清理 ----
     // 关键不变量是「串行」而不是「排序」：并行竞速（哪怕错开 1.2s）在真实冷启动下挡不住双下
     // —— 主源下完 2.58MB 实测需 1~4s（950/1165/2008/4163ms），1.2s 窗口只覆盖 2/5 次。
     // 串行后正常情况下第二个源根本不会被创建，误改成并发就会在这里立刻失败。
@@ -3618,6 +3618,19 @@ async function main() {
       '全库数据按源顺序串行回退（不并发下载）',
       serialOk,
       `createScript=${scriptCreateCount} stagger=${hasStagger}`,
+    );
+
+    // 超时只能"提前试下一个源"，不能"丢弃已经发出的请求"。
+    // 实测移除 script 节点后它不会再执行，那份已下载的字节就白费了（慢网下会白下 2.5MB，
+    // 表现为就绪 28~35s、缓存里留两份完整数据）。所以超时分支必须保留 onload 并继续等。
+    const timeoutBlock = fnBody.slice(fnBody.indexOf('var timer = setTimeout'));
+    const timeoutBody = timeoutBlock.slice(0, timeoutBlock.indexOf('}, FULL_CDN_TIMEOUT)'));
+    const clearsHandler = /onload\s*=|onerror\s*=/.test(timeoutBody);
+    const removesNode = /removeChild/.test(timeoutBody);
+    check(
+      '全库数据源超时后仍保留已发出的请求',
+      fnBody !== '' && !clearsHandler && !removesNode,
+      `clearsHandler=${clearsHandler} removesNode=${removesNode}`,
     );
 
     // sw.js 的双份数据清理：两个 CDN 都落过盘时只留主源那份（约省 2.5MB）；
