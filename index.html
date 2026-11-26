@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.23">
+<meta name="version" content="1.6.24">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.23</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.24</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3462,12 +3462,120 @@
       .filter(function (t) { return t; });
   }
 
+  // ---------- 归一化：让「同一条目的不同写法」落到同一个串上 ----------
+  // 用户会怎么输，实测过的几种：
+  //   全角「ＦＡＴＥ」、繁中「葬送的芙莉蓮」、片假名「スパイファミリー」、
+  //   带空格「spy family」、带符号「SPY×FAMILY」。
+  // 这四种差异都必须在比对前抹平，否则库里有这条、用户就是搜不到。
+  //
+  // 注意：这里只做「书写形式」的归一，不做「译名」的转换——
+  //   我心里危险的东西 ↔ 我内心的糟糕念头 是两个不同译名，任何转换表都救不了，
+  //   那种情况只能靠数据里的 al（别名）字段。两者分工不要混。
+  var T2CN = null;   // 繁→简转换器，vendor/opencc-t2cn.js 加载后填入
+
+  function normalizeText(s) {
+    var v = String(s == null ? '' : s);
+    if (!v) return '';
+    // NFC 先规整组合字符（浊点等），否则后面的逐字符处理会漏
+    if (v.normalize) v = v.normalize('NFC');
+    // 全角 ASCII（Ａ-Ｚ ａ-ｚ ０-９ 空格及标点）统一折半
+    if (/[\uFF01-\uFF5E\u3000]/.test(v)) {
+      v = v.replace(/[\uFF01-\uFF5E\u3000]/g, function (c) {
+        return c === '\u3000' ? ' ' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+      });
+    }
+    v = v.toLowerCase();
+    // 片假名 → 平假名（U+30A1-U+30F6 与 U+3041-U+3096 一一对应，减 0x60）。
+    // 日文输入法里「スパイ」和「すぱい」是同一个词，用户不会记得库里存的是哪种。
+    // 长音符「ー」(U+30FC) 不在区间内，保留原样。
+    if (/[\u30A1-\u30F6]/.test(v)) {
+      v = v.replace(/[\u30A1-\u30F6]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0x60);
+      });
+    }
+    if (T2CN) {
+      try { v = T2CN(v); } catch (e) { /* 单个字符异常不该拖垮搜索 */ }
+    }
+    return v;
+  }
+
+  // 索引侧归一化缓存：近万条 × 每个字段只算一次，否则每次输入都要重跑
+  var normCache = new Map();
+  function normField(x, key, raw) {
+    var ck = x.i + '\u0000' + key;
+    var hit = normCache.get(ck);
+    if (hit !== undefined) return hit;
+    var v = normalizeText(raw);
+    normCache.set(ck, v);
+    return v;
+  }
+
+  // 宽松形态：再抹掉空格与标点。只在严格匹配一条都没中时兜底使用，
+  // 否则「spy family」这类输入会把「SPY×FAMILY」的 L/N 全弄丢。
+  function compactText(s) {
+    return normalizeText(s).replace(/[\s!-/:-@[-`{-~·・、。，．：；！？「」『』（）【】《》〈〉〜～—–―…＆＃＠×÷]/g, '');
+  }
+  var compactCache = new Map();
+  function compactField(x, key, raw) {
+    var ck = x.i + '\u0000c' + key;
+    var hit = compactCache.get(ck);
+    if (hit !== undefined) return hit;
+    var v = compactText(raw);
+    compactCache.set(ck, v);
+    return v;
+  }
+
+  // 别名归一化结果：字段是数组，缓存按条目整体存
+  var aliasCache = new Map();
+  function aliasNorm(x) {
+    var ck = x.i;
+    var hit = aliasCache.get(ck);
+    if (hit !== undefined) return hit;
+    var arr = Array.isArray(x.al) ? x.al : [];
+    var norm = [];
+    var comp = [];
+    for (var i = 0; i < arr.length; i += 1) {
+      var t = normalizeText(arr[i]);
+      if (t) norm.push(t);
+      var c = compactText(arr[i]);
+      if (c) comp.push(c);
+    }
+    var rec = { norm: norm, compact: comp };
+    aliasCache.set(ck, rec);
+    return rec;
+  }
+
+  // 繁简转换表按需加载：108KB，不进首屏关键路径。
+  // 加载完成前搜索仍可用（只少繁体这一维），加载后自动重算一次缓存并刷新结果，
+  // 否则「先进页面再搜繁体」会白搜一次。
+  function loadT2CN() {
+    if (T2CN || !window.document) return;
+    var s = document.createElement('script');
+    s.src = 'vendor/opencc-t2cn.js';
+    s.async = true;
+    s.onload = function () {
+      try {
+        if (!(window.OpenCC && window.OpenCC.Converter)) return;
+        T2CN = window.OpenCC.Converter({ from: 'tw', to: 'cn' });
+        // 归一化缓存全部失效：之前的字段值是没做繁简折叠的
+        normCache.clear();
+        compactCache.clear();
+        aliasCache.clear();
+        listCache.key = '';
+        if (typeof render === 'function') render();
+      } catch (e) { /* 转换器构造失败就当没有繁简能力，不该让页面挂掉 */ }
+    };
+    s.onerror = function () { /* 加载失败保持现状：搜索仍可用，只是不通繁体 */ };
+    document.head.appendChild(s);
+  }
+
   // 搜索相关度：0 完全一致 > 1 前缀 > 2 包含，越靠前越优先
   // tokens 由调用方预计算传入：排序比较器会调用本函数约 n·log n 次，
   // 若每次都重新 searchTokens(q) 切词，会产生上万次多余正则 split。
+  // 别名命中最高只给 2（包含档）：别名是补充写法，不该压过官方名的前缀命中。
   function searchRank(x, q, tokens) {
-    var cn = String(x.cn || '').toLowerCase();
-    var n = String(x.n || '').toLowerCase();
+    var cn = normField(x, 'cn', x.cn);
+    var n = normField(x, 'n', x.n);
     var py = String(x.py || '');
     var fields = [cn, n];
     var best = 3;
@@ -3482,6 +3590,14 @@
       else if (py.indexOf(q) === 0) best = Math.min(best, 1);
       else if (py.indexOf(q) >= 0) best = Math.min(best, 2);
     }
+    // 别名：完全一致给 1（比官方名前缀略低、比包含高），其余只给 2
+    if (best > 1) {
+      var al = aliasNorm(x).norm;
+      for (var ai = 0; ai < al.length; ai += 1) {
+        if (al[ai] === q) { best = Math.min(best, 1); break; }
+        if (al[ai].indexOf(q) >= 0) best = Math.min(best, 2);
+      }
+    }
     // 多关键词时整串通常不会命中，退而用首个关键词的匹配档位排序
     if (best === 3 && tokens && tokens.length > 1) {
       var head = tokens[0];
@@ -3491,17 +3607,43 @@
         else if (f.indexOf(head) >= 0) best = Math.min(best, 2);
       });
       if (py && /^[a-z0-9]+$/.test(head) && py.indexOf(head) >= 0) best = Math.min(best, 2);
+      if (best === 3) {
+        var alh = aliasNorm(x).norm;
+        for (var hi = 0; hi < alh.length; hi += 1) {
+          if (alh[hi].indexOf(head) >= 0) { best = Math.min(best, 2); break; }
+        }
+      }
     }
     return best;
   }
 
-  // 单条记录是否命中关键词：中文名 / 原名 / 拼音首字母
-  function matchesQuery(x, token) {
-    var cn = String(x.cn || '').toLowerCase();
-    var n = String(x.n || '').toLowerCase();
-    var py = String(x.py || '');
-    return cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 ||
-      (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
+  // 单条记录是否命中关键词：中文名 / 原名 / 别名 / 拼音首字母
+  // token 已由调用方归一化（normalizeText），这里的字段也要过同一套归一化。
+  // loose 为真时再抹掉空格标点比一次，只用于「严格一条都没中」的兜底。
+  function matchesQuery(x, token, loose) {
+    if (!token) return true;
+    if (normField(x, 'cn', x.cn).indexOf(token) >= 0) return true;
+    if (normField(x, 'n', x.n).indexOf(token) >= 0) return true;
+    var al = aliasNorm(x);
+    var i;
+    for (i = 0; i < al.norm.length; i += 1) {
+      if (al.norm[i].indexOf(token) >= 0) return true;
+    }
+    // 拼音是首字母串，只对纯拉丁/数字查询有意义；中文词不该白跑一遍
+    if (/^[a-z0-9]+$/.test(token)) {
+      if (String(x.py || '').indexOf(token) >= 0) return true;
+    }
+    if (loose) {
+      var t = compactText(token);
+      if (t) {
+        if (compactField(x, 'cn', x.cn).indexOf(t) >= 0) return true;
+        if (compactField(x, 'n', x.n).indexOf(t) >= 0) return true;
+        for (i = 0; i < al.compact.length; i += 1) {
+          if (al.compact[i].indexOf(t) >= 0) return true;
+        }
+      }
+    }
+    return false;
   }
 
   // 筛选结果缓存：每次打开详情、按 ←/→ 切换都会重跑全库过滤 + 排序（近万条），状态没变时直接复用
@@ -3522,7 +3664,9 @@
 
   function computeFiltered() {
     var list = baseList();
-    var q = state.q.trim().toLowerCase();
+    // 查询词也要过归一化：否则用户打繁体「進擊」、全角「ＦＡＴＥ」、片假名「スパイ」时，
+    // 字段侧已归一成简体/半角/平假名，两边永远对不上。这一步不归一，前面全白做。
+    var q = normalizeText(state.q.trim());
     var allTokens = searchTokens(q);
     // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合
     var tokens = allTokens.filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
@@ -3534,10 +3678,18 @@
         list = list.filter(function (x) {
           return tokens.every(function (t) { return matchesQuery(x, t); });
         });
+        // 严格匹配一条都没中时，抹掉空格与标点再试一次。
+        // 「spy family」→「spyfamily」能命中「SPY×FAMILY」，但这类放宽会损失精度，
+        // 所以只在完全无结果时启用，不能混进正常结果里。
+        if (!list.length) {
+          list = baseList().filter(function (x) {
+            return tokens.every(function (t) { return matchesQuery(x, t, true); });
+          });
+        }
       }
       if (excludes.length) {
         list = list.filter(function (x) {
-          return !excludes.some(function (t) { return matchesQuery(x, t); });
+          return !excludes.some(function (t) { return matchesQuery(x, t, true); });
         });
       }
     } else if (state.tab === 'all') {
@@ -6683,6 +6835,13 @@
       setTimeout(loadFullData, 300);
     }
   }
+  // 繁简转换表排在数据补齐之后：它 108KB，不该和 2.5MB 的全库数据抢首屏带宽。
+  // 用户真要搜繁体时大概率已经过了一两秒，届时表已就绪。
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(function () { loadT2CN(); }, { timeout: 4000 });
+  } else {
+    setTimeout(loadT2CN, 1500);
+  }
   if (!canStore) {
     $('storageWarn').hidden = false;
   }
@@ -6714,6 +6873,20 @@
     render();
     toast('已合并其他标签页的追番改动');
   });
+
+  // 只读探针：仅供自动化验收使用。有了它，测试可以直接跑线上这套真实的
+  // 归一化 / 匹配 / 排序逻辑做全库审计，而不是在测试脚本里另抄一份 ——
+  // 抄一份的话，测的是副本，代码改了副本不改，永远都是绿的。
+  // 只暴露函数引用与只读数据，不提供任何写入入口。
+  window.__searchProbe = {
+    normalizeText: normalizeText,
+    matchesQuery: matchesQuery,
+    searchRank: searchRank,
+    searchTokens: searchTokens,
+    compactText: compactText,
+    t2cnReady: function () { return !!T2CN; },
+    data: function () { return DATA; },
+  };
 })();
 </script>
 <script>

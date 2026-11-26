@@ -564,6 +564,95 @@ async function main() {
     })()`);
     check('多关键词搜索取交集并全部高亮', multiInfo === 'true|true|true|true', multiInfo);
 
+    // ---------- 多语言 / 别名搜索维度 ----------
+    // 断言直接调用页面内的 __searchProbe 跑真实匹配管线，而不是在测试里重写一份逻辑：
+    // 重写等于测副本，改了实现也不会让断言变红。
+    // 每条断言都必须带「用例数为 0 就 FAIL」的守卫，否则 tested=0 会让它一路空跑报通过。
+    const multiLangRaw = await cdp.evaluate(`(() => {
+      const P = window.__searchProbe;
+      if (!P) return JSON.stringify({ ok: false, why: 'no-probe' });
+      const D = P.data();
+      const N = P.normalizeText;
+      const matchOne = (x, q, loose) => {
+        const toks = P.searchTokens(N(q));
+        return toks.length > 0 && toks.every((t) => P.matchesQuery(x, t, !!loose));
+      };
+      const out = {};
+
+      // 1) 繁体输入：人工核定的台/港写法，逐条要求命中数与简体写法一致
+      const TW = ${JSON.stringify([
+        ['進擊的巨人', '进击的巨人'],
+        ['葬送的芙莉蓮', '葬送的芙莉莲'],
+        ['鬼滅之刃', '鬼灭之刃'],
+        ['咒術迴戰', '咒术回战'],
+        ['電鋸人', '电锯人'],
+        ['刀劍神域', '刀剑神域'],
+        ['魔法少女小圓', '魔法少女小圆'],
+        ['天氣之子', '天气之子'],
+        ['千與千尋', '千与千寻'],
+        ['鋼之鍊金術師', '钢之炼金术师'],
+        ['新世紀福音戰士', '新世纪福音战士'],
+        ['灌籃高手', '灌篮高手'],
+        ['孤獨搖滾', '孤独摇滚'],
+        ['賽馬娘', '赛马娘'],
+        ['轉生變成史萊姆', '转生变成史莱姆'],
+      ])};
+      let twTested = 0, twOk = 0; const twMiss = [];
+      for (const [tw, cn] of TW) {
+        const expect = D.filter((x) => (x.cn || '').includes(cn));
+        if (!expect.length) continue;           // 该译名不在库里，不算作能力缺失
+        twTested += 1;
+        const got = expect.filter((x) => matchOne(x, tw, false)).length;
+        if (got === expect.length) twOk += 1;
+        else twMiss.push(tw + '→' + got + '/' + expect.length);
+      }
+      out.tw = { tested: twTested, hit: twOk, miss: twMiss };
+
+      // 2) 片假名输入折成平假名后仍应命中（用户不会记得库里存的是哪种假名）
+      let kTested = 0, kOk = 0;
+      for (const x of D) {
+        if (!/[\\u30A1-\\u30F6]/.test(x.n || '')) continue;
+        const hira = x.n.replace(/[\\u30A1-\\u30F6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+        if (hira === x.n) continue;
+        kTested += 1;
+        if (matchOne(x, hira, false)) kOk += 1;
+      }
+      out.kana = { tested: kTested, hit: kOk };
+
+      // 3) 英文别名原样搜（数据里的 al 字段，用户从外部看到的英文名）
+      let aTested = 0, aOk = 0; const aMiss = [];
+      for (const x of D) {
+        const a = (x.al || []).find((s) => /^[A-Za-z][A-Za-z0-9 :!?.,'-]{3,}$/.test(String(s)));
+        if (!a) continue;
+        aTested += 1;
+        if (matchOne(x, String(a), false)) aOk += 1;
+        else if (aMiss.length < 5) aMiss.push(String(a));
+      }
+      out.alias = { tested: aTested, hit: aOk, miss: aMiss };
+
+      // 4) 全角输入（中文输入法下常打出全角字母与空格）
+      let fTested = 0, fOk = 0;
+      const toFull = (s) => s.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xFEE0));
+      for (const x of D) {
+        const cn = (x.cn || '').trim();
+        if (!cn || !/[!-~]/.test(cn)) continue;   // 只取本身含半角字符的标题
+        fTested += 1;
+        if (matchOne(x, toFull(cn), false)) fOk += 1;
+      }
+      out.full = { tested: fTested, hit: fOk };
+
+      return JSON.stringify(out);
+    })()`);
+
+    {
+      const r = JSON.parse(multiLangRaw || '{}');
+      const pctOk = (o) => o && o.tested > 0 && o.hit === o.tested;
+      check('繁中输入可命中简体条目', pctOk(r.tw), r.tw ? `${r.tw.hit}/${r.tw.tested}${(r.tw.miss || []).length ? ' 漏:' + r.tw.miss.join(',') : ''}` : multiLangRaw);
+      check('片假名输入折平假名后仍命中', pctOk(r.kana), r.kana ? `${r.kana.hit}/${r.kana.tested}` : multiLangRaw);
+      check('英文别名可搜到对应条目', pctOk(r.alias), r.alias ? `${r.alias.hit}/${r.alias.tested}${(r.alias.miss || []).length ? ' 漏:' + r.alias.miss.join(',') : ''}` : multiLangRaw);
+      check('全角输入可命中半角标题', pctOk(r.full), r.full ? `${r.full.hit}/${r.full.tested}` : multiLangRaw);
+    }
+
     // 清空搜索
     await cdp.evaluate(`(() => {
       const input = document.getElementById('search');
@@ -1566,12 +1655,26 @@ async function main() {
       pagingStart,
     );
 
-    const pagingEnd = await cdp.evaluate(`(() => {
-      document.getElementById('loadMoreBtn').click();
+    // 点「显示更多」逐批追加，直到隐藏为止（条数变多后可能需要点多次）
+    const pagingEndRaw = await cdp.evaluate(`(async () => {
+      let guard = 0;
+      while (!document.getElementById('loadMore').hidden && guard < 30) {
+        document.getElementById('loadMoreBtn').click();
+        guard += 1;
+        await new Promise((r) => setTimeout(r, 120));
+      }
       return [document.querySelectorAll('#grid .card').length,
-        document.getElementById('loadMore').hidden].join('|');
+        document.getElementById('loadMore').hidden, guard].join('|');
     })()`);
-    check('点击显示更多补齐剩余条目', pagingEnd === total2024 + '|true', pagingEnd);
+    {
+      const [cards, hidden, rounds] = pagingEndRaw.split('|');
+      const ok =
+        total2024 > 240 &&
+        Number(cards) === total2024 &&
+        hidden === 'true' &&
+        Number(rounds) >= 1;
+      check('点击显示更多补齐剩余条目', ok, pagingEndRaw);
+    }
 
     // 空结果：显示「清除筛选条件」，点击后恢复列表
     await cdp.evaluate(`(() => {
@@ -2865,7 +2968,6 @@ async function main() {
           if (!card) return '';
           const item = byId.get(card.dataset.id);
           const countType = data.filter((x) => x.p === item.p).length;
-          const countRegion = data.filter((x) => x.g === item.g).length;
           card.click();
           await new Promise((r) => setTimeout(r, 350));
           const typeBtn = document.querySelector('#detailMeta [data-jump-type]');
@@ -2888,6 +2990,7 @@ async function main() {
           });
           const item2 = card2 ? byId.get(card2.dataset.id) : null;
           if (!item2) return JSON.stringify({ typeState, regionState: 'no-item' });
+          const countRegion2 = data.filter((x) => x.g === item2.g).length;
           card2.click();
           await new Promise((r) => setTimeout(r, 350));
           const regionBtn = document.querySelector('#detailMeta [data-jump-region]');
@@ -2904,7 +3007,7 @@ async function main() {
               .every((c) => (byId.get(c.dataset.id) || {}).g === item2.g),
           ].join('|');
           return JSON.stringify({
-            p: item.p, g: item2.g, countType, countRegion, typeState, regionState,
+            p: item.p, g: item2.g, countType, countRegion: countRegion2, typeState, regionState,
           });
         })()`);
         if (chipJumpInfo) break;

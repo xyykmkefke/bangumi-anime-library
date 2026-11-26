@@ -1,0 +1,17 @@
+# 统一行尾为 LF。
+#
+# 原因：scripts/gh-push.mjs 通过 GitHub Git Data API 直接上传磁盘字节，
+# 而 git 提交在 core.autocrlf=true（Windows 默认）下会把工作区的 CRLF 清洗成 LF。
+# 两者得到的 blob sha 不一致，发布时脚本里「remote tree 必须等于本地 HEAD tree」
+# 的硬校验就会中止。v1.6.22 发版时已因此失败过一次。
+#
+# 固定为 LF 后，磁盘、索引、远端三者字节一致，不再依赖本地 core.autocrlf 配置。
+* text=auto eol=lf
+
+# 二进制文件不要做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

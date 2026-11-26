@@ -25,9 +25,10 @@ const label = {
   id: '非法 ID',
   genre: '题材字段异常',
   leak: '缓存字段泄漏',
+  alias: '别名字段异常',
 };
 const issues = {
-  duplicate: [], date: [], score: [], eps: [], title: [], id: [], genre: [], leak: [],
+  duplicate: [], date: [], score: [], eps: [], title: [], id: [], genre: [], leak: [], alias: [],
 };
 const seen = new Map();
 
@@ -42,6 +43,20 @@ data.forEach((x, idx) => {
   if (x.e != null && (!Number.isInteger(Number(x.e)) || Number(x.e) < 0)) issues.eps.push(`${x.i}:${x.e}`);
   if (!String(x.cn || '').trim() && !String(x.n || '').trim()) issues.title.push(String(x.i));
   if (x.rt) issues.leak.push(String(x.i));
+  // 别名：有就必须是非空字符串数组，且不能与主名重复、不能重复自己、不能有单字符垃圾。
+  // 这些不是洁癖——别名会直接参与搜索匹配，脏数据会制造大范围误命中。
+  if (x.al != null) {
+    if (!Array.isArray(x.al) || !x.al.length) {
+      issues.alias.push(`${x.i}:${JSON.stringify(x.al)}`);
+    } else {
+      const bad = x.al.filter((a) => typeof a !== 'string' || !a.trim() || a.trim().length < 2);
+      if (bad.length) issues.alias.push(`${x.i}:非法项${JSON.stringify(bad).slice(0, 40)}`);
+      const lower = x.al.map((a) => String(a).toLowerCase());
+      if (new Set(lower).size !== lower.length) issues.alias.push(`${x.i}:重复`);
+      const main = new Set([String(x.n || '').trim(), String(x.cn || '').trim()].filter(Boolean));
+      if (x.al.some((a) => main.has(String(a).trim()))) issues.alias.push(`${x.i}:与主名重复`);
+    }
+  }
   if (x.tg != null) {
     if (!Array.isArray(x.tg) || !x.tg.length) {
       issues.genre.push(`${x.i}:${JSON.stringify(x.tg)}`);

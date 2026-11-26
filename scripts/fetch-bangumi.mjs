@@ -96,6 +96,47 @@ function toRegion(metaTags = [], tags = []) {
   return '';
 }
 
+// 从 infobox 抽出「别名」条目。Bangumi 的 value 有三种形态，实测都出现过：
+//   1) [{ v: 'Sousou no Frieren' }, { v: '葬送的芙莉蓮' }]   ← 最常见
+//   2) [{ k: '台湾译名', v: '超超超超喜歡你的 100 個女朋友' }, ...]  ← 带分类标签
+//   3) '单个字符串'
+// 别名是「用户能不能搜到」的关键：英文名、罗马字、台湾译名、粉丝简称（re0 第三季）都在这里，
+// 而 name / name_cn 只存官方两种写法。抽不到就等于这些写法全都搜不到。
+const ALIAS_MAX = 8;        // 单条上限，防个别条目别名爆炸（实测最多 20+）
+const ALIAS_MIN_LEN = 2;    // 单字符别名没有检索价值，还会制造大范围误命中
+
+function aliasList(item) {
+  const boxes = Array.isArray(item.infobox) ? item.infobox : [];
+  const out = [];
+  const seen = new Set();
+  const skip = new Set([String(item.name || '').trim(), String(item.name_cn || '').trim()].filter(Boolean));
+
+  const push = (raw) => {
+    const v = String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim();
+    if (v.length < ALIAS_MIN_LEN) return;
+    if (skip.has(v)) return;                 // 与主名重复的不必再存一份
+    const k = v.toLowerCase();               // 大小写不同视为同一个
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(v);
+  };
+
+  for (const box of boxes) {
+    if (!box || !/别名|alias/i.test(String(box.key || ''))) continue;
+    const val = box.value;
+    if (Array.isArray(val)) {
+      for (const one of val) {
+        if (one && typeof one === 'object') push(one.v);
+        else if (typeof one === 'string') push(one);
+      }
+    } else if (typeof val === 'string') {
+      // 少数条目用顿号/斜杠把多个别名挤在一格里
+      val.split(/[、/／|｜]/).forEach(push);
+    }
+  }
+  return out.slice(0, ALIAS_MAX);
+}
+
 function slim(item) {
   // rt 只写入季度缓存，便于以后调整题材映射时离线重算；不会进入 anime-data.js
   const tagNames = rawTagNames(item.meta_tags, item.tags);
@@ -112,6 +153,7 @@ function slim(item) {
     g: toRegion(item.meta_tags, item.tags),
     img: item.images?.common || item.images?.large || '',
     py: initials(item.name_cn || item.name || ''),
+    al: aliasList(item),
     rt: tagNames,
     tg: genreIdsFromNames(tagNames),
   };
@@ -267,6 +309,8 @@ async function main() {
       const { rt, ...rest } = item;
       if (tg.length) rest.tg = tg;
       else delete rest.tg;
+      // 空别名数组不落盘：约 1/4 条目没有别名，留着只是一堆 [] 占体积
+      if (!Array.isArray(rest.al) || !rest.al.length) delete rest.al;
       all.push(rest);
     }
   }
