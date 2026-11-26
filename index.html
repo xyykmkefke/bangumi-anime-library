@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.21">
+<meta name="version" content="1.6.22">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.21</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.22</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -6496,11 +6496,10 @@
       });
   }
 
-  // 首屏之后补齐完整数据：两个 jsDelivr CDN 竞速（先到先用），全部失败再回退本站
+  // 首屏之后补齐完整数据：全库数据按源顺序串行回退，全部失败再回退本站
   var fullState = fullReady ? 'ready' : 'idle';
-  // 单个 CDN 的等待上限（从该源发起时开始计时，不是全程总时长）
-  // 实测本机 cdn.jsdelivr.net 约 0.7s、gcore 约 5~9s，所以主源是前者、后者只作慢网兜底；
-  // 这里不能调低到 4s 以内——那会让 gcore 永远超时，等于把唯一的备用源废掉
+  // 单个源的等待上限。真实冷启动下 2.58MB 需要 1~4s，留 6s 让慢网也能下完；
+  // 调低会让正常慢网被误判为失败，反而触发下一个源、多下一份。
   var FULL_CDN_TIMEOUT = 6000;
   var FULL_ORIGIN_TIMEOUT = 10000;
 
@@ -6512,10 +6511,9 @@
     var ver = verEl ? verEl.getAttribute('content') : '';
     var repo = 'gh/xyykmkefke/bangumi-anime-library@' + (ver ? 'v' + ver : 'main') + '/data/anime-data.js';
     var suffix = META.generatedAt ? '?v=' + encodeURIComponent(META.generatedAt) : '';
-    // 顺序即优先级：第一个立即请求、第二个延后 1.2s。
-    // 必须把实测更快的 cdn.jsdelivr.net 放第一位——它通常 1s 内返回并置 fullReady，
-    // 备份源到此直接 return，第二个请求根本不会发出（一个源 = 一份 2.5MB 流量与缓存）。
-    // 反过来放（曾经如此）会让慢源占主位、快源被推迟 1.2s，两边都下完，流量与缓存双倍。
+    // 顺序即回退顺序：串行尝试，前一个失败/超时才发下一个，正常路径只下一个源。
+    // 两端实测速度相当（cdn 1307~5274ms / gcore 1519~2527ms），把 cdn 放前面是因为
+    // 它与 gcore 同为 jsDelivr 节点但国内可达性更稳；放反了不影响正确性，只影响首屏补齐的快慢。
     return [
       'https://cdn.jsdelivr.net/' + repo + suffix,
       'https://gcore.jsdelivr.net/' + repo + suffix,
@@ -6598,31 +6596,33 @@
     document.head.appendChild(s);
   }
 
-  // 备份源错开启动：两个 CDN 全速并行会把 2.58MB 下载两遍，
-  // 所以第二个源延后 1.2s 才发起，只有首个源明显慢/失败时才真正并上下载。
-  // 全部失败或超时后回退同源；最坏耗时仍是 CDN 6s + 同源 10s 的量级。
+  // 串行回退：主源失败或超时才发下一个源。
+  // 曾用「两个 CDN 并行竞速 + 第二个延后 1.2s」错峰，实测无效——真实冷启动下主源下完
+  // 2.58MB 需要 1~4s（950/1165/2008/4163ms），1.2s 窗口只覆盖到 2/5 次，其余几次
+  // 备份源照样发出，两边都下完（实测 5/6 次双下）。而两个 CDN 速度其实相当
+  // （cdn 1307~5274ms vs gcore 1519~2527ms），竞速拿不到稳定的"更快"，只换来双份流量。
+  // 串行后正常路径绝对只下一个源，代价只是主源失败时要多一次往返。
   function raceFullSources() {
     var list = fullDataSources();
     var cdn = list.filter(function (u) { return /^https:/.test(u); });
     if (!cdn.length) { tryOriginSource(); return; }
-    var pending = cdn.length;
-    var applying = false;
+    var idx = 0;
 
-    function startOne(src) {
-      if (applying || fullReady) return;
+    function attempt() {
+      if (fullReady) return;
+      if (idx >= cdn.length) { tryOriginSource(); return; }
+      var src = cdn[idx];
+      idx += 1;
       var s = document.createElement('script');
       var settled = false;
       var timer = setTimeout(function () {
         if (settled || fullReady) return;
         settled = true;
         s.onload = s.onerror = null;
-        // 注意：移除 script 只放弃等待，不会中止已发出的请求，剩下的字节仍会下完
-        // （实测移除后照样收到完整 2523KB；只有 fetch + AbortController 能真中断，
-        //  但 CSP 未开 unsafe-eval，取回的文本无法执行）。所以省流量只能靠"不发这个请求"，
-        //  也就是让更快的源排第一位、在 1.2s 内触发 fullReady——见 fullDataSources 的注释。
+        // 移除 script 只放弃等待，不会中止已发出的请求（实测移除后仍收完 2523KB）。
+        // 这里真正的收益是"下一个源晚 6s 才发"，不会与当前这个重叠。
         if (s.parentNode) s.parentNode.removeChild(s);
-        pending -= 1;
-        if (!pending) tryOriginSource();
+        attempt();
       }, FULL_CDN_TIMEOUT);
       s.async = true;
       // 走 CORS：jsDelivr 对正常与 404 响应都带 ACAO，SW 才能识别失败、不把错误页缓存成数据
@@ -6632,28 +6632,20 @@
         if (settled || fullReady) return;
         settled = true;
         clearTimeout(timer);
-        if ((window.ANIME_DATA || []).length > DATA.length) {
-          applying = true;
-          applyFullData();
-          return;
-        }
-        pending -= 1;
-        if (!pending) tryOriginSource();
+        if ((window.ANIME_DATA || []).length > DATA.length) { applyFullData(); return; }
+        // 脚本加载了但数据没变多（例如 CDN 返回了错误页），当作这个源不可用
+        attempt();
       };
       s.onerror = function () {
         if (settled || fullReady) return;
         settled = true;
         clearTimeout(timer);
-        pending -= 1;
-        if (!pending) tryOriginSource();
+        attempt();
       };
       document.head.appendChild(s);
     }
 
-    cdn.forEach(function (src, i) {
-      if (i === 0) startOne(src);
-      else setTimeout(function () { startOne(src); }, 1200 * i);
-    });
+    attempt();
   }
 
   function loadFullData() {

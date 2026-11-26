@@ -3597,21 +3597,27 @@ async function main() {
     })()`);
     check('其他标签页的改动按时间戳合并', crossTab === 'true|done|5', crossTab);
 
-    // ---- 全库数据：主源顺序 + 双份缓存清理 ----
-    // 主源必须是实测更快的 cdn.jsdelivr.net。第二个源延后 1.2s 才发起，只有主源在 1.2s 内
-    // 完成并置 fullReady，备份源才会被 startOne 开头的 `if (applying || fullReady) return` 拦掉。
-    // 顺序反了（曾经是 gcore 在前）会让 5~9s 的慢源占主位、0.7s 的快源被推迟 1.2s，
-    // 结果两边都下完：多一倍流量，SW 缓存里还多存一份 2.5MB。
+    // ---- 全库数据：串行回退 + 双份缓存清理 ----
+    // 关键不变量是「串行」而不是「排序」：并行竞速（哪怕错开 1.2s）在真实冷启动下挡不住双下
+    // —— 主源下完 2.58MB 实测需 1~4s（950/1165/2008/4163ms），1.2s 窗口只覆盖 2/5 次。
+    // 串行后正常情况下第二个源根本不会被创建，误改成并发就会在这里立刻失败。
     const orderSrc = await readFile(path.join(ROOT, 'index.html'), 'utf8');
-    const fnStart = orderSrc.indexOf('function fullDataSources');
-    const fnEnd = orderSrc.indexOf('function applyFullData');
+    const fnStart = orderSrc.indexOf('function raceFullSources');
+    const fnEnd = orderSrc.indexOf('function loadFullData');
     const fnBody = fnStart >= 0 && fnEnd > fnStart ? orderSrc.slice(fnStart, fnEnd) : '';
-    const posPrimary = fnBody.indexOf('//cdn.jsdelivr.net/');
-    const posBackup = fnBody.indexOf('//gcore.jsdelivr.net/');
+    // 串行特征：只有一个创建 script 的位置（在 attempt 里），且没有 setTimeout 错峰启动
+    const scriptCreateCount = (fnBody.match(/document\.createElement\('script'\)/g) || []).length;
+    const hasStagger = /setTimeout\(\s*function\s*\(\)\s*\{\s*attempt|1200\s*\*\s*i/.test(fnBody);
+    const serialOk =
+      fnBody !== '' &&
+      scriptCreateCount === 1 &&
+      !hasStagger &&
+      /idx\s*\+=\s*1/.test(fnBody) &&
+      /indexOf|cdn\[idx\]/.test(fnBody);
     check(
-      '全库数据主源为 cdn.jsdelivr.net（快源优先）',
-      fnBody !== '' && posPrimary >= 0 && posBackup >= 0 && posPrimary < posBackup,
-      `cdn@${posPrimary} gcore@${posBackup}`,
+      '全库数据按源顺序串行回退（不并发下载）',
+      serialOk,
+      `createScript=${scriptCreateCount} stagger=${hasStagger}`,
     );
 
     // sw.js 的双份数据清理：两个 CDN 都落过盘时只留主源那份（约省 2.5MB）；
