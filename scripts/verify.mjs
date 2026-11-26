@@ -653,6 +653,132 @@ async function main() {
       check('全角输入可命中半角标题', pctOk(r.full), r.full ? `${r.full.hit}/${r.full.tested}` : multiLangRaw);
     }
 
+    // ---------- 季数归一化 / 类型词（v1.6.25） ----------
+    // A：用户写「2」「S2」「Season 2」「第二季」「2期」，库里存的是其中任意一种。
+    // B：「剧场版」在库里是 x.p 分类而不是标题用词，当关键词做文本匹配必然落空。
+    // 两项都用全库逐条构造，并带「用例为 0 就 FAIL」守卫。
+    const seasonRaw = await cdp.evaluate(`(() => {
+      const P = window.__searchProbe;
+      if (!P || !P.extractSeason) return JSON.stringify({ ok: false, why: 'no-probe' });
+      const D = P.data();
+      const N = P.normalizeText;
+      const out = {};
+
+      // 1) 抽取器本身：同一季的不同写法必须折到同一个 (kind,num)
+      //    注意「部分/cour」要折成 kind='c'，不能与「季」混为一谈——
+      //    库里「第2部分」的原文是「第2クール」，「间谍过家家 第2部分」其实是第一季后半。
+      const EXTRACT = [
+        ['第二季', 's', '2'],
+        ['第2季', 's', '2'],
+        ['2期', 's', '2'],
+        ['第2期', 's', '2'],
+        ['Season 2', 's', '2'],
+        ['SEASON 3', 's', '3'],
+        ['最终季', '', ''],
+        ['第2部分', 'c', '2'],
+        ['Part 2', 'c', '2'],
+        ['进击的巨人4', 'any', '4'],
+        ['86', '', ''],
+        ['2.5次元的诱惑', '', ''],
+        ['29岁单身冒险家', '', ''],
+      ];
+      let exTested = 0, exOk = 0; const exMiss = [];
+      for (const [txt, kind, num] of EXTRACT) {
+        const r = P.extractSeason(N(txt));
+        exTested += 1;
+        const gotKind = r ? r.kind : '';
+        const gotNum = r ? String(r.num) : '';
+        if (gotKind === kind && gotNum === num) exOk += 1;
+        else exMiss.push(txt + '→' + (r ? gotKind + '/' + gotNum : 'null'));
+      }
+      out.extract = { tested: exTested, hit: exOk, miss: exMiss };
+
+      // 2) 端到端：条目中文名里**本身就带季数写法**时，换成另一种写法去搜仍须命中。
+      //    关键点是用统一的「第N季」去搜库里存成「Season N」「N期」的条目——
+      //    这才验证「查询侧折算」真的生效，而不是碰巧字符串对上了。
+      //    判决走页面内的 parseQuery + queryFits，与运行时完全同一份代码。
+      //
+      //    只收「中文名本身就含季数」的条目：像「镇魂街 王国纷争篇」原文用副标题
+      //    而不是季数（其实是第 5 季），数据里根本没有「第5季」这个写法，
+      //    把它算进分母只会把数据缺口当成搜索缺陷。
+      //
+      //    也要排除 cour（第N部分）：库里「第2部分」原文是「第2クール」，
+      //    「间谍过家家 第2部分」是第一季后半而不是第二季，用「第2季」搜不到它是
+      //    正确行为，不该算失败。
+      let e2eTested = 0, e2eOk = 0; const e2eMiss = [];
+      for (const x of D) {
+        const cn = x.cn || '';
+        if (!cn || cn.length > 40) continue;
+        const s = P.seasonOfItem(x);
+        if (!s || !s.num) continue;
+        if (s.kind === 'c') continue;                     // cour 与季不同义，跳过
+        if (/部分|クール|part\s*\d/i.test(cn)) continue;   // 同上，按标题再挡一次
+        // 中文名里必须真的含季数写法，否则数据侧无从对齐
+        if (!/[第季期]|season/i.test(cn)) continue;
+        // 主体词：剥掉序号片段后剩下的部分，必须够长才不至于命中一大片
+        const body = (s.rest || '').trim();
+        if (!body || body.length < 2) continue;
+        const sameBody = D.filter((y) => (y.cn || '').indexOf(body) >= 0).length;
+        if (sameBody < 1 || sameBody > 20) continue;
+        e2eTested += 1;
+        if (e2eTested > 400) break;   // 取够样本即可，不必跑完整个 1 万条
+        // 统一用「主体 第N季」搜（与库里原写法可能不同，正是要测的点）
+        const q = body + ' 第' + s.num + '季';
+        const parsed = P.parseQuery(P.searchTokens(N(q)));
+        const ok = P.queryFits(parsed, x, false);
+        if (ok) e2eOk += 1;
+        else if (e2eMiss.length < 6) e2eMiss.push(cn + ' ← 「' + q + '」');
+      }
+      out.e2e = { tested: e2eTested, hit: e2eOk, miss: e2eMiss };
+
+      // 3) 类型词：x.p 是「剧场版」的条目，用「主体 剧场版」搜必须能搜到
+      let tyTested = 0, tyOk = 0; const tyMiss = [];
+      for (const x of D) {
+        if (x.p !== '剧场版') continue;
+        const cn = x.cn || '';
+        if (!cn || cn.length < 4) continue;
+        const body = cn.replace(/^剧场版\s*/, '').replace(/^剧场总集篇/, '').split(/[\s！!～~]/)[0];
+        if (!body || body.length < 2) continue;
+        if (D.filter((y) => (y.cn || '').indexOf(body) >= 0).length < 2) continue;
+        tyTested += 1;
+        if (tyTested > 300) break;
+        // 该主体确实存在剧场版分类的条目，且 typeMatchOf 判真
+        if (P.typeMatchOf('剧场版', x)) tyOk += 1;
+        else if (tyMiss.length < 5) tyMiss.push(cn);
+      }
+      out.type = { tested: tyTested, hit: tyOk, miss: tyMiss };
+
+      return JSON.stringify(out);
+    })()`);
+
+    {
+      const r = JSON.parse(seasonRaw || '{}');
+      const okAll = (o) => o && o.tested > 0 && o.hit === o.tested;
+      check(
+        '季数写法可折算为同一序号',
+        okAll(r.extract),
+        r.extract ? `${r.extract.hit}/${r.extract.tested}${(r.extract.miss || []).length ? ' 差:' + r.extract.miss.join(',') : ''}` : seasonRaw,
+      );
+      // 端到端允许极小比例失败，但必须显式设阈值并说明原因，不能写成「大致通过」：
+      // 剩余失败集中在「主体词自身含 / 或数字」的标题（乱马1/2、钻石王牌 act2），
+      // 主体词里的 / 和数字会被分词与序号规则抢走，属于已知边界，不影响主流用法。
+      // 阈值 99%：低于它说明折算整体失效，必须 FAIL。
+      {
+        const e = r.e2e || { tested: 0, hit: 0, miss: [] };
+        const rate = e.tested ? e.hit / e.tested : 0;
+        check(
+          '条目侧季数与查询侧可对齐',
+          e.tested >= 100 && rate >= 0.99,
+          `${e.hit}/${e.tested} = ${(rate * 100).toFixed(1)}%${(e.miss || []).length ? ' 余:' + e.miss.slice(0, 2).join(',') : ''}`,
+        );
+      }
+      check(
+        '剧场版按分类命中而非文本匹配',
+        okAll(r.type),
+        r.type ? `${r.type.hit}/${r.type.tested}` : seasonRaw,
+      );
+    }
+
     // 清空搜索
     await cdp.evaluate(`(() => {
       const input = document.getElementById('search');

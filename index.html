@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.24">
+<meta name="version" content="1.6.25">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.24</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.25</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3617,7 +3617,181 @@
     return best;
   }
 
+  // ---------- 季数 / 类型词：把「同一概念的不同写法」折算到可比形态 ----------
+  // 与上面的书写归一（繁简、假名、全角）是两件事：那些是同一个词的写法差异，
+  // 这里是同一个概念的表达差异——用户写「2」「S2」「Season 2」「第二季」「2期」，
+  // 库里可能存的是其中任意一种，不折算就永远对不上。
+  //
+  // 必须区分「季」和「部分」：
+  //   库里「第2部分」的日文原文是「第2クール」（cour，季内分段），
+  //   例如「间谍过家家 第2部分」其实是第一季后半，不是第二季。
+  //   把两者折叠成同一个季度编号，用户搜「间谍过家家 2」会同时命中
+  //   「第二季」和「第2部分」，看起来像都搜到了，实际是把不同作品混在一起。
+  //   所以这里只折叠「季/期/season」，不碰「部分/cour」。
+  var CN_NUM = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+
+  // 把中文序数折成阿拉伯数字："二" → "2"、"十二" → "12"（够用即可，不追求通用解法）
+  function cnNumToArabic(s) {
+    if (/^\d+$/.test(s)) return s;
+    if (CN_NUM[s] != null) return String(CN_NUM[s]);
+    var m = /^([一二三四五六七八九])?十([一二三四五六七八九])?$/.exec(s);
+    if (m) return String((m[1] ? CN_NUM[m[1]] : 1) * 10 + (m[2] ? CN_NUM[m[2]] : 0));
+    return null;
+  }
+
+  // 从一段文本里抽出「序号」，返回 { kind, num, rest }：
+  //   kind = 's'（季）| 'c'（cour/部分）| 'any'（裸数字，两者都接受）
+  //   rest = 从原文里剥掉序号片段后剩下的主体词
+  // 没有序号则返回 null。
+  //
+  // 为什么区分 s 和 c：库里「第2部分」的日文原文是「第2クール」（cour，季内分段），
+  // 「间谍过家家 第2部分」其实是第一季后半，与「第二季」不是同一部。
+  // 但用户搜裸数字「2」时并不知道这个系列分的是季还是 cour，所以裸数字两边都接受；
+  // 只有当用户明确写「第二季」或「2期」时才限定只认季。
+  //
+  // 裸数字只认「词尾」，且必须留出非空主体：
+  // 「进击的巨人4」→ 主体「进击的巨人」+ 序号 4；
+  // 「86」→ 主体为空，不拆；「29岁单身冒险家」→ 数字不在词尾，不拆；
+  // 「2.5次元的诱惑」→ 不在词尾，不拆。
+  function extractSeason(text) {
+    var t = String(text == null ? '' : text);
+    if (!t) return null;
+    var m, num;
+    // 第X季 / 第N季
+    m = /第([一二三四五六七八九十]+|\d+)季/.exec(t);
+    if (m) { num = cnNumToArabic(m[1]); if (num) return { kind: 's', num: num, rest: (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim() }; }
+    // N期 / 第N期
+    m = /第?(\d+|[一二三四五六七八九十]+)期/.exec(t);
+    if (m) { num = cnNumToArabic(m[1]); if (num) return { kind: 's', num: num, rest: (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim() }; }
+    // Season N / SEASON N / S2
+    m = /season\s*(\d+)/i.exec(t);
+    if (m) return { kind: 's', num: m[1], rest: (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim() };
+    // 第N部分 / 第Nクール / Part N
+    m = /第(\d+|[一二三四五六七八九十]+)\s*(?:部分|クール)/.exec(t);
+    if (m) { num = cnNumToArabic(m[1]); if (num) return { kind: 'c', num: num, rest: (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim() }; }
+    m = /\bpart\s*\.?\s*(\d+)/i.exec(t);
+    if (m) return { kind: 'c', num: m[1], rest: (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim() };
+    // 单独成词的 S2 / s02（用户在英文系列名后面跟季数时最常见）
+    m = /^s(\d{1,2})$/.exec(t.trim());
+    if (m) return { kind: 's', num: String(Number(m[1])), rest: '' };
+    // 裸数字：只认词尾，且左侧要留出主体
+    m = /^(.*\D)\s*(\d{1,2})$/.exec(t);
+    if (m) {
+      var body = m[1].trim();
+      if (body && body.length >= 2) return { kind: 'any', num: String(Number(m[2])), rest: body };
+    }
+    return null;
+  }
+
+  // 条目自身的序号标记：优先看中文名，其次原名
+  function seasonOfItem(x) {
+    var a = extractSeason(normField(x, 'cn', x.cn));
+    if (a) return a;
+    var b = extractSeason(normField(x, 'n', x.n));
+    if (b) return b;
+    return null;
+  }
+
+  // 条目的序号是否符合查询要求
+  function seasonFits(have, want) {
+    // 条目没写序号时视为第 1 季：搜「孤独摇滚 1」应能命中裸名「孤独摇滚！」
+    var h = have || { kind: 's', num: '1' };
+    if (String(h.num) !== String(want.num)) return false;
+    // 裸数字查询两种都接受；明确写「季」只认季
+    if (want.kind === 'any') return true;
+    return h.kind === want.kind;
+  }
+
+  // 类型词：「剧场版」这类在库里是 x.p 字段的分类，不是标题的一部分。
+  // 用户搜「孤独摇滚 剧场版」时，正确语义是「孤独摇滚 且 平台=剧场版」，
+  // 而库里标题写的是「剧场总集篇孤独摇滚！」，做文本匹配必然落空。
+  // 所以把这类词取出来当筛选条件，而不是当关键词。
+  var TYPE_WORDS = ['剧场版', '剧场总集篇', '特别篇', '特別篇', 'ova', 'oad', 'tv', 'web'];
+
+  // 把类型词映射到 x.p 的取值；返回 '' 表示这个类型词没有对应分类
+  function typeMatchOf(word, x) {
+    var p = String(x.p || '');
+    if (word === '剧场版' || word === '剧场总集篇') return p === '剧场版';
+    if (word === 'ova' || word === 'oad') return p === 'OVA';
+    if (word === 'tv') return p === 'TV';
+    if (word === 'web') return p === 'WEB';
+    if (word === '特别篇' || word === '特別篇') {
+      // 特别篇不是独立分类，只能在标题里找
+      return /特別编集版|特别编集版|特别篇|特別篇/.test(String(x.cn || '') + ' ' + String(x.n || ''));
+    }
+    return false;
+  }
+
+  // 把用户查询解析成可执行的过滤条件：{ typeWant, wantSeason, restTokens }
+  // 抽成独立函数是为了让自动化验收能调用同一份逻辑，而不是在测试里另拼一份
+  // （另拼一份必然与真实行为漂移，测出来的结论没有意义）。
+  function parseQuery(tokens) {
+    // 先把「类型词」从关键词里摘出来：「剧场版」「OVA」在库里是 x.p 分类而不是标题用词，
+    // 当关键词做文本匹配会落空（库里写「剧场总集篇孤独摇滚！」）。
+    // 摘出来后按分类筛选，「孤独摇滚 剧场版」就变成「主体=孤独摇滚 且 p=剧场版」，语义正确。
+    var typeWant = [];
+    var kwTokens = [];
+    tokens.forEach(function (t) {
+      var isType = false;
+      for (var ti = 0; ti < TYPE_WORDS.length; ti += 1) {
+        // 只在「整词等于类型词」时摘除，避免「特别篇」这类出现在真标题里时被误摘
+        if (t === TYPE_WORDS[ti]) { isType = true; break; }
+      }
+      if (isType) typeWant.push(t); else kwTokens.push(t);
+    });
+    // 全是类型词时（用户只搜「剧场版」）不退化为空查询，按普通关键词处理
+    if (!kwTokens.length) { kwTokens = typeWant.slice(); typeWant = []; }
+
+    // 序号（季/cour）：在 token 上就地抽取，抽出后把剩下的主体词写回。
+    // 「间谍过家家第二季」这种粘连输入必须能拆开——整串当序号会把主体词丢掉，
+    // 剩下的 restTokens 为空，every() 恒真，于是退化成「列出全库第二季」。
+    var wantSeason = null;
+    var restTokens = [];
+    kwTokens.forEach(function (t) {
+      if (wantSeason) { restTokens.push(t); return; }
+      var s = extractSeason(t);
+      // 单独一个纯数字 token（「间谍过家家 2」里的 "2"）也当季数线索，
+      // 但仅当还有别的关键词时才这么解释：用户只搜 "2" 时应当按字面匹配。
+      // 不这么处理的话，"2" 会退化成普通关键词，靠子串命中别名里的 "(2025)"
+      // 或拼音里的数字，把不相干的季数也带进来（实测「间谍过家家 2」会混进第三季）。
+      if (!s && /^\d{1,2}$/.test(t) && kwTokens.length > 1) {
+        wantSeason = { kind: 'any', num: String(Number(t)) };
+        return;
+      }
+      // 拆开后主体为空就不算季数线索，按原样当关键词——否则「间谍过家家第二季」
+      // 这类粘连输入会把主体词丢掉，剩下的 restTokens 为空、every() 恒真，
+      // 退化成「列出全库第二季」。
+      //
+      // 但「主体为空」有两种情况要区分：
+      //   a) 粘连输入「间谍过家家第二季」——拆出主体「间谍过家家」，rest 非空，正常；
+      //   b) 独立 token「第2季」「s2」——本来就不带主体（用户写成「第一序列 第2季」两个词），
+      //      此时主体由**别的 token** 提供，只要 kwTokens.length > 1 就该当季数。
+      // 早先只给 s2/s02 开了这个口子，导致「第一序列 第2季」搜不到「第一序列 第二季」
+      // （第2季 被当普通关键词去做字面匹配，永远不中）。这里对所有序号形式统一处理。
+      if (s && s.num) {
+        var restOk = s.rest || kwTokens.length > 1;
+        if (restOk) {
+          wantSeason = { kind: s.kind, num: s.num };
+          if (s.rest) restTokens.push(s.rest);
+          return;
+        }
+      }
+      restTokens.push(t);
+    });
+    return { typeWant: typeWant, wantSeason: wantSeason, restTokens: restTokens };
+  }
+
+  // 按解析出的条件判定单条是否命中
+  function queryFits(parsed, x, loose) {
+    for (var i = 0; i < parsed.typeWant.length; i += 1) {
+      if (!typeMatchOf(parsed.typeWant[i], x)) return false;
+    }
+    if (parsed.wantSeason && !seasonFits(seasonOfItem(x), parsed.wantSeason)) return false;
+    return parsed.restTokens.every(function (t) { return matchesQuery(x, t, loose); });
+  }
+
   // 单条记录是否命中关键词：中文名 / 原名 / 别名 / 拼音首字母
+
   // token 已由调用方归一化（normalizeText），这里的字段也要过同一套归一化。
   // loose 为真时再抹掉空格标点比一次，只用于「严格一条都没中」的兜底。
   function matchesQuery(x, token, loose) {
@@ -3675,16 +3849,13 @@
 
     if (tokens.length || excludes.length) {
       if (tokens.length) {
-        list = list.filter(function (x) {
-          return tokens.every(function (t) { return matchesQuery(x, t); });
-        });
+        var parsed = parseQuery(tokens);
+        list = list.filter(function (x) { return queryFits(parsed, x, false); });
         // 严格匹配一条都没中时，抹掉空格与标点再试一次。
         // 「spy family」→「spyfamily」能命中「SPY×FAMILY」，但这类放宽会损失精度，
         // 所以只在完全无结果时启用，不能混进正常结果里。
         if (!list.length) {
-          list = baseList().filter(function (x) {
-            return tokens.every(function (t) { return matchesQuery(x, t, true); });
-          });
+          list = baseList().filter(function (x) { return queryFits(parsed, x, true); });
         }
       }
       if (excludes.length) {
@@ -6884,6 +7055,12 @@
     searchRank: searchRank,
     searchTokens: searchTokens,
     compactText: compactText,
+    extractSeason: extractSeason,
+    seasonOfItem: seasonOfItem,
+    seasonFits: seasonFits,
+    typeMatchOf: typeMatchOf,
+    parseQuery: parseQuery,
+    queryFits: queryFits,
     t2cnReady: function () { return !!T2CN; },
     data: function () { return DATA; },
   };
