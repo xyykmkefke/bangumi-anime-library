@@ -146,23 +146,27 @@ if (!localTag) {
   warn(`本地缺少标签 ${tag}（发布前创建；CI 浅克隆可忽略）`);
 } else {
   const target = git(['rev-list', '-n1', tag]);
+  // 判据要比对 **origin/main**，不是本地 HEAD。
+  // 两条原因叠加：
+  //   ① gh-push 走 GitHub API 建提交，哈希与本地不同（父提交、作者时间戳都可能不一样）
+  //   ② 发版之后往往还有文档/工具类提交（--no-tag 同步），本地 HEAD 会领先于标签
+  // 只看「在 HEAD 历史中」会把这两种正常情况都判成错误。远端 main 的历史链才是
+  // 真正的判据——标签必须已进入线上那条链。
+  let inRemote = false;
   try {
-    git(['merge-base', '--is-ancestor', target, 'HEAD']);
-    pass(`标签 ${tag} 指向当前分支历史`);
-  } catch {
-    // gh-push 走 GitHub API 建提交，与本地 commit 的哈希必然不同（父提交、作者时间戳
-    // 都可能不一样），但 tree 一致。所以「不在 HEAD 历史中」不能直接判错——
-    // 下面第 200 行对 origin/main 已经用 tree 比对处理过同一种情况，这里要一致。
-    let sameTree = false;
-    try {
-      const tagTree = git(['rev-parse', `${target}^{tree}`]);
-      const headTree2 = git(['rev-parse', 'HEAD^{tree}']);
-      sameTree = !!tagTree && tagTree === headTree2;
-    } catch {}
-    if (sameTree) {
-      pass(`标签 ${tag} 指向 ${target.slice(0, 7)}（与 HEAD 内容一致，API 推送时提交哈希不同）`);
+    git(['merge-base', '--is-ancestor', target, 'origin/main']);
+    inRemote = true;
+  } catch {}
+  if (inRemote) {
+    pass(`标签 ${tag} 已进入 origin/main 历史（${target.slice(0, 7)}）`);
+  } else {
+    // 远端链里没有，再退回本地 HEAD（离线或未 fetch 的场景）
+    let inHead = false;
+    try { git(['merge-base', '--is-ancestor', target, 'HEAD']); inHead = true; } catch {}
+    if (inHead) {
+      pass(`标签 ${tag} 指向当前分支历史`);
     } else {
-      fail(`标签 ${tag} 指向 ${target.slice(0, 7)}，不在 HEAD 历史中且内容不一致`);
+      fail(`标签 ${tag} 指向 ${target.slice(0, 7)}，既不在 origin/main 也不在 HEAD 历史中`);
     }
   }
   const type = git(['cat-file', '-t', tag]);
