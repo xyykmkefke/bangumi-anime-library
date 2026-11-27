@@ -150,7 +150,20 @@ if (!localTag) {
     git(['merge-base', '--is-ancestor', target, 'HEAD']);
     pass(`标签 ${tag} 指向当前分支历史`);
   } catch {
-    fail(`标签 ${tag} 指向 ${target.slice(0, 7)}，不在 HEAD 历史中`);
+    // gh-push 走 GitHub API 建提交，与本地 commit 的哈希必然不同（父提交、作者时间戳
+    // 都可能不一样），但 tree 一致。所以「不在 HEAD 历史中」不能直接判错——
+    // 下面第 200 行对 origin/main 已经用 tree 比对处理过同一种情况，这里要一致。
+    let sameTree = false;
+    try {
+      const tagTree = git(['rev-parse', `${target}^{tree}`]);
+      const headTree2 = git(['rev-parse', 'HEAD^{tree}']);
+      sameTree = !!tagTree && tagTree === headTree2;
+    } catch {}
+    if (sameTree) {
+      pass(`标签 ${tag} 指向 ${target.slice(0, 7)}（与 HEAD 内容一致，API 推送时提交哈希不同）`);
+    } else {
+      fail(`标签 ${tag} 指向 ${target.slice(0, 7)}，不在 HEAD 历史中且内容不一致`);
+    }
   }
   const type = git(['cat-file', '-t', tag]);
   if (type !== 'tag') warn(`标签 ${tag} 不是 annotated tag（当前 ${type}）`);
