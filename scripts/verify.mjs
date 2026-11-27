@@ -165,7 +165,9 @@ function check(name, ok, detail) {
 
 async function main() {
   const browser = findBrowser();
-  const profile = path.join(os.tmpdir(), 'anime-verify-profile');
+  // 每次运行用独立 profile：固定目录名会在上一轮浏览器尚未完全退出时互相争抢，
+  // 表现为启动阶段直接 EBUSY: ... anime-verify-profile\Functional SAN Data（实测连跑必现）。
+  const profile = path.join(os.tmpdir(), 'anime-verify-profile-' + process.pid + '-' + Date.now());
   await rm(profile, { recursive: true, force: true });
 
   const server = await startServer();
@@ -180,6 +182,11 @@ async function main() {
         '--disable-gpu',
         '--hide-scrollbars',
         '--no-first-run',
+        // 扩展必须禁用：即便用全新 profile，Windows 上的 Edge 仍会加载内置组件扩展，
+        // 它们注入的 content script 会抛「listener indicated an asynchronous response …
+        // message channel closed」，被「交互过程无新增 JS 异常」误判成页面缺陷。
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
         ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
         `--remote-debugging-port=${CDP_PORT}`,
         `--user-data-dir=${profile}`,
@@ -3911,6 +3918,8 @@ async function main() {
     }
     server.close();
     if (!KEEP) {
+      // taskkill 返回时浏览器可能仍有句柄未释放，立刻 rm 会 EBUSY；等一小会儿再清
+      await sleep(600);
       try { await rm(profile, { recursive: true, force: true }); } catch {}
     }
   }
