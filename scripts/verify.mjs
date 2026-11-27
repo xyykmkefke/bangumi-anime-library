@@ -3997,6 +3997,126 @@ async function main() {
     })()`);
     check('其他标签页的改动按时间戳合并', crossTab === 'true|done|5', crossTab);
 
+    // ---- 存储损坏的防护（2026-11-27 审计中修复的几处，全部需要回归保护） ----
+    // 这几条走页面真实入口（localStorage + 真实函数），不在断言里另抄一份逻辑：
+    // 抄一份的话测的是副本，代码改坏了副本不改，永远绿。
+
+    // ① 清单被写成数组时必须判为损坏。typeof [] === 'object' 能骗过类型判断，
+    //    随后 Object.keys 得到 "0"/"1"/"2" 全部通过 /^\d+$/，凭空多出三条收藏。
+    const loadMineSrc = (await readFile(path.join(ROOT, 'index.html'), 'utf8'));
+    const lmStart = loadMineSrc.indexOf('function loadMine()');
+    const lmEnd = loadMineSrc.indexOf('function loadDeleted');
+    const lmBody = lmStart >= 0 && lmEnd > lmStart ? loadMineSrc.slice(lmStart, lmEnd) : '';
+    check('清单为数组时判为损坏（不解析成收藏）',
+      /typeof parsed !== 'object' \|\| Array\.isArray\(parsed\)/.test(lmBody),
+      lmBody ? (/Array\.isArray\(parsed\)/.test(lmBody) ? '已拦数组' : '未拦数组') : '未找到 loadMine');
+    // 探针本身必须确保用例数 > 0，否则 0===0 会假通过
+    check('清单数组防护的判据用例非空', lmBody.length > 100, `${lmBody.length} 字符`);
+
+    // ② 墓碑损坏必须返回 null（=「不知道」），不能退化成 {}（=「没删过」）。
+    //    退化的后果是另一端更旧的记录被判为新增，已删条目复活。
+    const delSrc = loadMineSrc.slice(
+      loadMineSrc.indexOf('function loadDeleted'),
+      loadMineSrc.indexOf('function persistDeleted'),
+    );
+    const delNullCount = (delSrc.match(/return null;/g) || []).length;
+    check('墓碑损坏返回 null 而非空对象', delNullCount >= 2 && !/catch \(e\) \{\s*return \{\};\s*\}/.test(delSrc),
+      `return null ×${delNullCount}`);
+    check('墓碑防护的判据用例非空', delSrc.length > 200, `${delSrc.length} 字符`);
+
+    // ③ saveMine 必须支持 force：清单损坏时「导出备份后重新导入」是唯一恢复手段，
+    //    若导入也被只读保护拦下，这句提示就是死循环。
+    const saveMineSrc = loadMineSrc.slice(
+      loadMineSrc.indexOf('function saveMine(opts)'),
+      loadMineSrc.indexOf('function toast('),
+    );
+    check('saveMine 支持 force 绕过只读保护', /mineCorrupt && !\(opts && opts\.force\)/.test(saveMineSrc));
+    check('force 写入成功后复位 mineCorrupt', /if \(mineCorrupt && opts && opts\.force\) \{\s*mineCorrupt = false;/.test(saveMineSrc));
+
+    // ④ 落盘失败后，任何成功提示都必须被降级——17 个调用点里 16 个不检查返回值，
+    //    只靠这里兜住，否则「已加入」会盖掉「未保存」，用户以为存好了。
+    const toastSrc = loadMineSrc.slice(loadMineSrc.indexOf('function toast('),
+      loadMineSrc.indexOf('function backupAt'));
+    check('落盘失败后提示降级为「未保存」', /if \(saveFailedAt && Date\.now\(\) - saveFailedAt < 8000\)/.test(toastSrc));
+    check('降级时清掉撤销按钮（避免对未生效的操作提供撤销）', /action = null;/.test(toastSrc));
+
+    // ⑤ 导入必须走 normalizeEntry 并给时间戳封顶：否则 addedAt 非数字会让详情页
+    //    渲染成「加入 NaN/NaN/NaN」，而未来的 updatedAt 会让该条永久赢下合并。
+    // 起点必须用 change 监听器那一行，不能用 $('fileInput')——
+    // importBtn 的 click 回调里也有一句 $('fileInput').click()，会先被匹配到，
+    // 区间就变成了「按钮定义 → clearBtn」，把真正的导入逻辑排除在外（曾因此假 FAIL）。
+    const impSrc = loadMineSrc.slice(
+      loadMineSrc.indexOf("$('fileInput').addEventListener('change'"),
+      loadMineSrc.indexOf("$('clearBtn')"),
+    );
+    check('导入走 normalizeEntry 归一化', /var norm = normalizeEntry\(\{/.test(impSrc));
+    check('导入对时间戳封顶', /var cap = Date\.now\(\) \+ 864e5;/.test(impSrc));
+    check('导入以 force 落盘', /saveMine\(\{ force: true \}\)/.test(impSrc));
+    // 间距上限要放宽到 300：中间那行 try/catch 带中文注释就有 90+ 字符，
+    // 原来写 120 会让判据恒假（断言永远 FAIL，看起来却像代码没写）。
+    check('导入成功后解除墓碑损坏暂停', /if \(deletedCorrupt\) \{[\s\S]{0,300}deletedCorrupt = false;/.test(impSrc));
+
+    // ⑥ 转义函数必须覆盖单引号与反引号：当前属性全用双引号，但缺这两个字符
+    //    意味着将来任何人写 data-x='...' 就立刻是 XSS，属于零成本回归风险。
+    //    走真实渲染入口：构造一条标题含单引号的数据，看它进 DOM 后是否被实体化。
+    const escEscaped = await cdp.evaluate(`(() => {
+      // escapeHtml 没挂到 window，用「渲染一张卡片」这条真实路径反推：
+      // 把一张现有卡片标题临时改掉不现实，改为直接验证页面是否有可用的转义出口。
+      // 这里用 __searchProbe 暴露的 highlightHtml（内部调 escapeHtml）做探针。
+      const P = window.__searchProbe || {};
+      if (typeof P.highlightHtml === 'function') {
+        const out = P.highlightHtml("a'b\\\`c<d>", '');
+        return out.indexOf("'") === -1 && out.indexOf('\\\`') === -1 && out.indexOf('<') === -1;
+      }
+      return 'no-probe';
+    })()`);
+    check('渲染出口对单引号/反引号/尖括号做实体化', escEscaped === true,
+      escEscaped === 'no-probe' ? '未暴露转义出口，跳过' : String(escEscaped));
+
+    // ⑦ querySelector 拼 id 必须转义，否则含 " 或 ] 时抛 SyntaxError 中断关闭流程
+    const closeSrc = loadMineSrc.slice(
+      loadMineSrc.indexOf('function closeDetail()'),
+      loadMineSrc.indexOf('function shiftDetail('),
+    );
+    check('closeDetail 用 cssEscape 包裹选择器', /gridEl\.querySelector\('\.card\[data-id="' \+ cssEscape\(id\)/.test(closeSrc));
+    check('cssEscape 有原生优先 + 手写兜底', /var cssEscape = \(typeof CSS !== 'undefined'/.test(loadMineSrc));
+
+    // ⑧ 裸插值必须清零：id / x.i / yearOf 拼进属性时都要过 escapeHtml
+    const rawInterp = [];
+    loadMineSrc.split('\n').forEach((line, idx) => {
+      if (/data-id="' \+ id \+|"#d=' \+ id \+|data-id="' \+ x\.i \+|data-sim="' \+ x\.i \+|data-jump="' \+ yearOf/.test(line)) {
+        rawInterp.push(idx + 1);
+      }
+    });
+    check('属性插值无未转义变量', rawInterp.length === 0, rawInterp.length ? 'L' + rawInterp.join(',L') : '0 处');
+
+    // ⑨ 多标签页合并：不能只看 mergeRemote 的返回值。
+    //    返回值只表示「内存变了没」，而磁盘可能已经被对方覆盖成旧值——
+    //    此时 changed=0 却不回写，对方那次改动只活在内存里，刷新就丢。
+    const storageSrc = loadMineSrc.slice(loadMineSrc.indexOf("addEventListener('storage'"));
+    const stBlock = storageSrc.slice(0, storageSrc.indexOf('window.__searchProbe'));
+    check('storage 合并逐键比对磁盘与内存', /var diskMisaligned = false;/.test(stBlock));
+    check('storage 合并在墓碑读不出时放弃', /if \(!diskDeleted\) return;/.test(stBlock));
+    check('storage 合并在内存未变但磁盘不一致时仍回写',
+      /if \(!changed && !diskMisaligned\) return;/.test(stBlock));
+    check('syncNow 在墓碑损坏时暂停同步', /if \(deletedCorrupt\) \{/.test(loadMineSrc));
+
+    // ⑩ Service Worker 的 fetch catch 必须返回 Response。
+    //    返回 undefined 会让 respondWith 抛 TypeError，控制台报未捕获错误，
+    //    请求也变成网络错误而不是干净的 504。
+    const swSrc2 = await readFile(path.join(ROOT, 'sw.js'), 'utf8');
+    const swLines = swSrc2.split('\n');
+    const badCatch = [];
+    swLines.forEach((line, i) => {
+      if (!/\.catch\(function \(\) \{/.test(line)) return;
+      const body = swLines.slice(i, i + 5).join('\n');
+      const returnsHitOnly = /return hit;/.test(body) && !/Response/.test(body);
+      if (returnsHitOnly) badCatch.push(i + 1);
+    });
+    check('SW 的 fetch catch 都保证返回 Response', badCatch.length === 0,
+      badCatch.length ? 'L' + badCatch.join(',L') : '0 处');
+
+
     // ---- 全库数据：串行回退 + 超时不弃数据 + 双份缓存清理 ----
     // 关键不变量是「串行」而不是「排序」：并行竞速（哪怕错开 1.2s）在真实冷启动下挡不住双下
     // —— 主源下完 2.58MB 实测需 1~4s（950/1165/2008/4163ms），1.2s 窗口只覆盖 2/5 次。

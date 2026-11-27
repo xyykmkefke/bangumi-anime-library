@@ -1,6 +1,6 @@
 // 应用壳离线缓存：页面网络优先并带超时回退，其余同源资源缓存优先、后台更新
 // 壳缓存随版本升级整体替换；封面单独放一个长期缓存，发版不再清空已下载的图片
-var CACHE = 'yuc-anime-shell-v36';
+var CACHE = 'yuc-anime-shell-v37';
 var IMG_CACHE = 'yuc-anime-images-v1';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js', './vendor/opencc-t2cn.js'];
 var IMG_LIMIT = 500;
@@ -115,7 +115,10 @@ self.addEventListener('fetch', function (e) {
           }
           return res;
         }).catch(function () {
-          return hit;
+          // 离线且从未缓存过：必须返回一个真正的 Response。
+          // 返回 undefined 会让 respondWith 抛 TypeError（Failed to convert value
+          // to 'Response'），控制台出现未捕获错误，请求也变成网络错误而不是干净的 504。
+          return hit || new Response('', { status: 504, statusText: 'Offline' });
         });
         return hit || net;
       })
@@ -143,7 +146,9 @@ self.addEventListener('fetch', function (e) {
           // 部署中/回滚时的 502/404 不应盖掉可用的离线壳
           return hit || res;
         }).catch(function () {
-          return hit || caches.match('./', { ignoreSearch: true });
+          // 页面壳彻底没命中（连 './' 都没缓存）时也要给 Response
+          return hit || caches.match('./', { ignoreSearch: true })
+            .then(function (root) { return root || new Response('', { status: 504, statusText: 'Offline' }); });
         });
         if (!hit) return net;
         var timer = new Promise(function (resolve) {
@@ -166,7 +171,8 @@ self.addEventListener('fetch', function (e) {
         }
         return hit || res;
       }).catch(function () {
-        return hit;
+        // 同 117 行：离线且命中为空时必须给 Response，undefined 会抛 TypeError
+        return hit || new Response('', { status: 504, statusText: 'Offline' });
       });
       return hit || net;
     })

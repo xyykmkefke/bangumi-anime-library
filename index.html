@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.27">
+<meta name="version" content="1.6.28">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.27</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.28</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2739,7 +2739,16 @@
   // 用 var 虽不会报错，但声明在调用之后会让 loadMine 里的赋值被随后的初始化覆盖回 false
   var mineCorrupt = false;
   var myMap = loadMine();
-  var myDeleted = loadDeleted();
+  // loadDeleted() 返回 null 表示「墓碑读不出来」，语义上必须与「没删过」（{}）区分。
+  // 但 myDeleted 后面到处都是 myDeleted[id] 直接读写，null 会直接抛 TypeError。
+  // 折中：内存里用空对象占位，另用 deletedCorrupt 记住「这次读失败过」，
+  // 由 syncNow 决定放弃本次同步——既不崩，也不会用空墓碑覆盖别人的删除记录。
+  var deletedCorrupt = false;
+  var myDeleted = (function () {
+    var d = loadDeleted();
+    if (d === null) { deletedCorrupt = true; return {}; }
+    return d;
+  })();
   // 清单版本号：每次写入递增，供筛选结果缓存判断是否需要重算
   var mapRev = 0;
   // 探测本地存储是否可用，不可用时给出常驻提示
@@ -2792,7 +2801,11 @@
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return {};
       var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') { mineCorrupt = true; return {}; }
+      // 数组要单独判掉：typeof [] === 'object' 能通过下面那行，于是 Object.keys
+      // 会得到 "0"/"1"/"2"，全部通过 /^\d+$/，内存里凭空多出 id=0/1/2 的「收藏」，
+      // 还会被 buildPayload 推到 Gist、被导出带进备份文件。byId 里没有这些 id，
+      // 列表渲染时又被静默跳过，所以从界面上完全看不出来，只在导出时露馅。
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { mineCorrupt = true; return {}; }
       var out = {};
       Object.keys(parsed).forEach(function (id) {
         // 只接受数字 ID，避免异常键（如 __proto__）污染对象原型
@@ -2810,11 +2823,18 @@
   }
 
   // 删除墓碑：多设备同步时用来区分「另一端新加」和「另一端删掉了」
+  //
+  // 解析失败返回 null 而不是 {}，两者语义完全不同：
+  //   {}   = 「我没删过任何东西」  → 同步时会把别人删掉的条目拉回来
+  //   null = 「我不知道自己删过什么」→ 调用方必须放弃本次同步
+  // 原先一律返回 {}，只要 DEL_KEY 内容损坏（或写入失败后残留半截），
+  // 下次同步就会用「墓碑为 0」去比对，另一端更旧的记录被判定为新增而复活。
   function loadDeleted() {
     try {
       var raw = localStorage.getItem(DEL_KEY);
-      var parsed = raw ? JSON.parse(raw) : {};
-      if (!parsed || typeof parsed !== 'object') return {};
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
       var out = {};
       var cutoff = Date.now() - DEL_MAX_AGE;
       Object.keys(parsed).forEach(function (id) {
@@ -2824,7 +2844,7 @@
       });
       return out;
     } catch (e) {
-      return {};
+      return null;
     }
   }
 
@@ -2851,24 +2871,52 @@
     persistDeleted();
   }
 
+  // 上一次落盘是否失败，以及失败原因。调用方大多不看 saveMine 的返回值就直接
+  // toast('已加入…')，那条成功提示会盖掉失败提示，用户以为改动已保存、刷新后才发现丢了。
+  // 与其逐个改 16 个调用点（容易漏），不如在 toast 里兜住：失败后短时间内的任何
+  // 提示都降级为「未保存」，让失败不可能被成功文案掩盖。
+  var saveFailedAt = 0;
+  var saveFailReason = '';
+
+  function showStorageWarn(text) {
+    var warnEl = $('storageWarn');
+    if (!warnEl) return;
+    warnEl.hidden = false;
+    warnEl.textContent = text;
+  }
+
   function saveMine(opts) {
     mapRev += 1;
-    // 原始数据解析失败时禁止落盘：内存里的空清单会覆盖掉可抢救的原件
-    if (mineCorrupt) {
-      var warnEl = $('storageWarn');
-      if (warnEl) {
-        warnEl.hidden = false;
-        warnEl.textContent = '本地清单读取失败，改动暂不保存（原件已备份到浏览器存储）。请导出备份后重新导入。';
-      }
+    // 原始数据解析失败时禁止落盘：内存里的空清单会覆盖掉可抢救的原件。
+    // opts.force 供「用户明确要求覆盖」的路径使用（导入 / 清空）：
+    // 那两条路径上原件已经由用户导出备份过，再拦着会让「导出后重新导入」
+    // 这句提示变成死循环——导入自己就调 saveMine，被自己拦下。
+    if (mineCorrupt && !(opts && opts.force)) {
+      showStorageWarn('本地清单读取失败，改动暂不保存（原件已备份到浏览器存储）。请导出备份后重新导入。');
+      saveFailReason = 'corrupt';
+      saveFailedAt = Date.now();
       return false;
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
+      // 写入成功即解除只读保护：损坏的原件此时已被合法数据覆盖
+      if (mineCorrupt && opts && opts.force) {
+        mineCorrupt = false;
+        $('storageWarn').hidden = true;
+      }
     } catch (e) {
-      // 写入失败（配额满 / 隐私模式）时内存已改、磁盘没改，必须常驻提示，否则刷新后改动凭空消失
-      var warn = $('storageWarn');
-      if (warn) warn.hidden = false;
+      // 写入失败（配额满 / 隐私模式）时内存已改、磁盘没改，必须常驻提示，否则刷新后改动凭空消失。
+      // 文案要区分「禁用」与「写满」：原先一律说「浏览器禁用了本地存储」，
+      // 配额满的用户会去翻浏览器设置，方向完全错。
+      // 注意顺序：先 showStorageWarn / toast，最后才落 saveFailedAt。
+      // 若先落 saveFailedAt，这条失败提示自己会被 toast 的「未保存：」前缀二次包裹，
+      // 变成「未保存：本地存储写入失败：…」这种叠字。
+      saveFailReason = (e && (e.name === 'QuotaExceededError' || e.code === 22)) ? 'quota' : 'blocked';
+      showStorageWarn(saveFailReason === 'quota'
+        ? '本地存储已满，改动暂不保存。请导出备份后清理浏览器数据，或删除部分已看记录再试。'
+        : '当前浏览器禁用了本地存储，加入的番剧只在本次打开期间有效。请切到「我的番剧」用「导出备份」保存结果。');
       toast('本地存储写入失败：本次改动未保存，请导出备份后重试');
+      saveFailedAt = Date.now();
       return false;
     }
     // 云同步写入本机时不计数，也不触发回推，避免同步循环
@@ -2881,6 +2929,14 @@
 
   function toast(msg, action) {
     clearTimeout(toastTimer);
+    // 落盘刚失败过（8 秒内）就把任何提示降级成「未保存」。
+    // 调用方普遍是「saveMine(); toast('已加入…')」的写法，不检查返回值，
+    // 成功文案会立刻盖掉 saveMine 里的失败提示——用户看到「已加入」、
+    // 刷新后却发现没了。与其改 16 个调用点（还会漏），不如在这里统一兜住。
+    if (saveFailedAt && Date.now() - saveFailedAt < 8000) {
+      msg = '未保存：' + msg + '（本地存储不可用，详见顶部提示）';
+      action = null;
+    }
     toastEl.innerHTML = '';
     var text = document.createElement('span');
     text.textContent = msg;
@@ -3264,8 +3320,20 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      // 单引号与反引号当前没有拼进单引号属性（全站属性都用双引号），
+      // 但转义它们零成本，能挡住将来有人新增 data-x='...' 时立刻变成 XSS。
+      .replace(/'/g, '&#39;')
+      .replace(/`/g, '&#96;');
   }
+
+  // 拼进 querySelector 的字符串必须转义，否则含 " 或 ] 时选择器语法错误、抛 SyntaxError。
+  // 优先用原生 CSS.escape（语义最准），老环境退回一个够用的手写版。
+  var cssEscape = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+    ? function (v) { return CSS.escape(String(v)); }
+    : function (v) {
+      return String(v).replace(/["\\\]\[]/g, function (c) { return '\\' + c; });
+    };
 
   // 标题关键词高亮：按原文分段再逐段转义，避免标签注入；整串命中时整体高亮，否则按多个关键词分别高亮并合并重叠区间
   function highlightHtml(str, q) {
@@ -4004,9 +4072,12 @@
     var selected = selecting && bulkSel[id];
     var phHue = Number(String(x.i).slice(-3)) % 360;
 
-    return '<article class="card' + (picked ? ' picked' : '') + (selected ? ' selected' : '') + '" data-id="' + id + '" title="' + escapeHtml(titleText) + '">' +
+    // 插值处一律过 escapeHtml：id 实际全是数字，但「当前数据恰好干净」不是保证。
+    // 一旦数据文件被污染（构建脚本 bug、CDN 被换），i 变成 1" onmouseover="... 就能
+    // 闭合属性；配合 CSP 里的 'unsafe-inline' 直接是 XSS。这里只转义不放宽任何逻辑。
+    return '<article class="card' + (picked ? ' picked' : '') + (selected ? ' selected' : '') + '" data-id="' + escapeHtml(id) + '" title="' + escapeHtml(titleText) + '">' +
       (selecting ? '<button class="selbox" type="button" data-act="select" aria-label="选择《' + escapeHtml(titleText) + '》" aria-pressed="' + !!selected + '">✓</button>' : '') +
-      '<a class="card-link" href="#d=' + id + '" tabindex="-1" aria-label="查看《' + escapeHtml(titleText) + '》详情">' +
+      '<a class="card-link" href="#d=' + escapeHtml(id) + '" tabindex="-1" aria-label="查看《' + escapeHtml(titleText) + '》详情">' +
         '<div class="cover' + (x.img ? '' : ' noimg') + '" style="--phh:' + phHue + '">' +
           (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
             (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
@@ -4108,7 +4179,7 @@
         (items.length ? items.map(function (x) {
           var titleText = x.cn || x.n || '未知番剧';
           var entry = myMap[String(x.i)];
-          return '<a class="cal-item" href="#d=' + x.i + '" data-id="' + x.i + '">' +
+          return '<a class="cal-item" href="#d=' + escapeHtml(String(x.i)) + '" data-id="' + escapeHtml(String(x.i)) + '">' +
             '<span class="ci-cover"><span class="ci-ph">' + escapeHtml(String(titleText).charAt(0)) + '</span>' +
             (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
               (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="40px"' : '') +
@@ -4651,10 +4722,13 @@
         String(jd.getDate()).padStart(2, '0')]);
     }
     var jumpQuarter = quarterOf(item.d);
+    // yearOf 取的是 d.slice(0,4)，正常情况下是四位数字；但 d 来自数据文件，
+    // 直接拼进属性与文本节点没有兜底。jumpQuarter 已由 quarterOf 收敛为 1-4，安全。
+    var jumpYear = escapeHtml(String(yearOf(item.d)));
     var jumpHtml = jumpQuarter
-      ? '<button class="chipjump" type="button" data-jump="' + yearOf(item.d) + '-' + jumpQuarter +
-        '" title="查看 ' + yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季的全部番剧">' +
-        yearOf(item.d) + ' 年 ' + jumpQuarter + ' 月季 ›</button>'
+      ? '<button class="chipjump" type="button" data-jump="' + jumpYear + '-' + jumpQuarter +
+        '" title="查看 ' + jumpYear + ' 年 ' + jumpQuarter + ' 月季的全部番剧">' +
+        jumpYear + ' 年 ' + jumpQuarter + ' 月季 ›</button>'
       : '';
     var genreHtml = (item.tg || []).map(function (gid) {
       var label = GENRE_LABEL[gid];
@@ -4691,7 +4765,7 @@
     $('detailSimilar').innerHTML = sims.length
       ? '<div class="similar-head">相似推荐 · 同类型同地区</div><div class="similar-list">' +
         sims.map(function (x) {
-          return '<button class="sim-card" type="button" data-sim="' + x.i + '">' +
+          return '<button class="sim-card" type="button" data-sim="' + escapeHtml(String(x.i)) + '">' +
             '<span class="sim-title">' + escapeHtml(x.cn || x.n || '未知番剧') + '</span>' +
             '<span class="sim-meta">' + (x.s ? Number(x.s).toFixed(1) : '暂无') +
             (x.d ? ' · ' + escapeHtml(x.d) : '') + '</span></button>';
@@ -4726,7 +4800,10 @@
     writeHash();
     // Esc / 关闭后把焦点还给触发卡片，键盘用户不丢失位置
     if (!back || !document.contains(back) || back.offsetParent === null) {
-      back = id ? gridEl.querySelector('.card[data-id="' + id + '"]') : null;
+      // id 走 CSS.escape：含 " 或 ] 时裸拼会让 querySelector 抛 SyntaxError，
+      // 异常从 closeDetail 冒出去，后面的焦点恢复和界面收敛全部中断。
+      // 这不是注入（querySelector 不解析 HTML），但会变成一个可触发的崩溃点。
+      back = id ? gridEl.querySelector('.card[data-id="' + cssEscape(id) + '"]') : null;
     }
     if (back && back.focus) back.focus();
   }
@@ -6218,6 +6295,7 @@
       try {
         var parsed = JSON.parse(String(reader.result));
         var raw = Array.isArray(parsed) ? parsed : (parsed.items || parsed.ids || []);
+        if (!Array.isArray(raw)) throw new Error('结构不符');
         var added = 0;
         var merged = 0;
         var skipped = 0;
@@ -6229,12 +6307,22 @@
           var ep = Math.max(0, Math.round(Number(isObj && entry.ep) || 0));
           var cur = myMap[id];
           if (!cur) {
-            myMap[id] = {
+            // 走 normalizeEntry 而不是就地拼对象：后者不过滤 addedAt/updatedAt，
+            // 导入 [{"addedAt":"abc"}] 会让详情页 new Date('abc') 渲染成「加入 NaN/NaN/NaN」；
+            // 更糟的是 updatedAt 若是个未来时间戳，这条在 mergeRemote 里永远算「更新」，
+            // 另一台设备的真实修改会被永久压掉。normalizeEntry 会把非数字折成 now。
+            var norm = normalizeEntry({
               s: status,
               t: (isObj && entry.addedAt) || (Date.now() + index),
               ep: ep,
               u: (isObj && (entry.updatedAt || entry.addedAt)) || Date.now()
-            };
+            });
+            // 时间戳不允许超过「现在 + 1 天」：手工编辑或恶意备份里的远期时间
+            // 会让这条记录永远赢下合并，等于永久锁死。
+            var cap = Date.now() + 864e5;
+            if (norm.t > cap) norm.t = cap;
+            if (norm.u > cap) norm.u = cap;
+            myMap[id] = norm;
             clearDeleted(id);
             added += 1;
             return;
@@ -6243,8 +6331,24 @@
           cur.ep = Math.max(Number(cur.ep) || 0, ep);
           merged += 1;
         });
-        saveMine();
+        // 墓碑损坏时一并重置：syncNow 在 deletedCorrupt 时会拒绝同步，
+        // 而导入只写 STORAGE_KEY、不碰 DEL_KEY，于是「导出备份后重新导入」
+        // 这句提示会变成死循环——导入完还是同步不了。导入的语义就是
+        // 「以这份备份为权威」，损坏的墓碑本来就读不出内容，重置成空对象
+        // 是唯一能恢复同步的做法（真正的删除记录已经在损坏时丢了）。
+        if (deletedCorrupt) {
+          try { localStorage.setItem(DEL_KEY, '{}'); } catch (e2) { /* 写不进就保持暂停 */ }
+          myDeleted = {};
+          deletedCorrupt = false;
+        }
+        // force: 清单本身已损坏时，导入正是用户被引导来做的恢复手段。
+        // 不加这个参数的话 saveMine 的只读保护会把导入拦下，
+        // 于是「导出备份后重新导入」这句提示永远不会生效。
+        var ok = saveMine({ force: true });
         render();
+        // 没写进磁盘就不要报「导入完成」——toast 层已经会把文案降级成「未保存」，
+        // 但这里再明确说一句，避免 skin 上出现「未保存：导入完成」这种自相矛盾的话
+        if (!ok) return;
         toast('导入完成：新增 ' + added + ' 部，合并 ' + merged + ' 部' +
           (skipped ? '，跳过 ' + skipped + ' 条无效记录' : ''));
       } catch (err) {
@@ -6637,6 +6741,13 @@
         setSyncStatus('请先填写访问令牌', 'err');
         openSync();
       }
+      return Promise.resolve(false);
+    }
+    // 墓碑读不出来时不要推：空墓碑等于向所有设备广播「我没删过任何东西」，
+    // 别处已删除的条目会在下一次合并时被当成新增拉回来。
+    // 不静默吞掉——告诉用户去重新导入一份备份，那会重写墓碑。
+    if (deletedCorrupt) {
+      setSyncStatus('删除记录损坏，已暂停同步（请导出备份后重新导入）', 'err');
       return Promise.resolve(false);
     }
     // 手动同步：重置退避计数，立即执行
@@ -7051,14 +7162,42 @@
   window.addEventListener('storage', function (e) {
     if (e.key !== STORAGE_KEY && e.key !== DEL_KEY) return;
     var disk = loadMine();
+    var diskDeleted = loadDeleted();
+    // 墓碑读不出来（null）时不能继续合并：那等于用「我没删过任何东西」去覆盖，
+    // 会把在另一端已删除的条目当成新增拉回来。宁可这次不合并，等下次事件再试。
+    if (!diskDeleted) return;
     var items = Object.keys(disk).map(function (id) {
       var m = disk[id];
       return { id: Number(id), status: m.s, addedAt: m.t || 0, ep: m.ep || 0, updatedAt: m.u || m.t || 0 };
     });
-    if (!mergeRemote({ items: items, deleted: loadDeleted() })) return;
+    // mergeRemote 的返回值只表示「内存里有没有被改动」，不表示「磁盘上是否已经是合并结果」。
+    // 两标签页同时改时会出现：对方先写盘、我这边内存里的旧值已被对方写入过一份，
+    // 于是合并后内存没变化（changed=0）但磁盘上还是我被覆盖前的旧清单。
+    // 这种情况必须照样回写，否则对方那次改动只活在内存里，我刷新就丢。
+    var changed = mergeRemote({ items: items, deleted: diskDeleted });
+    // 逐键比较而不是 JSON.stringify 整体比对：对象键顺序不保证一致，
+    // 整体序列化会把「内容相同、顺序不同」误判成需要回写，每次都白写一遍。
+    var diskMisaligned = false;
+    var diskKeys = Object.keys(disk);
+    var memKeys = Object.keys(myMap);
+    if (diskKeys.length !== memKeys.length) {
+      diskMisaligned = true;
+    } else {
+      for (var ki = 0; ki < memKeys.length; ki += 1) {
+        var k = memKeys[ki];
+        var a = disk[k];
+        var b = myMap[k];
+        if (!a || !b || a.s !== b.s || Number(a.ep) !== Number(b.ep) ||
+            Number(a.t) !== Number(b.t) || Number(a.u) !== Number(b.u)) {
+          diskMisaligned = true;
+          break;
+        }
+      }
+    }
+    if (!changed && !diskMisaligned) return;
     saveMine({ fromSync: true });
     render();
-    toast('已合并其他标签页的追番改动');
+    toast(changed ? '已合并其他标签页的追番改动' : '已修复被覆盖的追番清单');
   });
 
   // 只读探针：仅供自动化验收使用。有了它，测试可以直接跑线上这套真实的
@@ -7079,6 +7218,9 @@
     queryFits: queryFits,
     t2cnReady: function () { return !!T2CN; },
     data: function () { return DATA; },
+    // 转义出口：验收要验证「单引号/反引号/尖括号是否被实体化」，
+    // 只能走真实渲染函数，不能在测试里另抄一份 escapeHtml（抄的那份永远测不出回归）。
+    highlightHtml: highlightHtml,
   };
 })();
 </script>
