@@ -163,6 +163,36 @@ function check(name, ok, detail) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  → ' + detail : ''}`);
 }
 
+// 杀掉本次验收启动的整个浏览器进程树。
+//
+// 为什么不能只 taskkill /PID child.pid /T：
+//   Edge 首次用新的 --user-data-dir 启动时，spawn 出来的可能只是 launcher，
+//   它拉起真正的 browser 进程后自己就退了。child.pid 一旦失效，`/T` 无从展开子树，
+//   一个子进程都杀不到 —— 但 taskkill 仍返回 0，从外部看像「已经处理过了」。
+//   现象是临时 profile 一直被占、rm 报 EBUSY，容易被误判成「Edge 子进程没杀干净」。
+//
+// 兜底判据：命令行里含本轮 profile 的**目录名**。不依赖父子关系，也不依赖 pid 存活。
+// 注意 PowerShell 的 -like 里 `\` 是字面量、不要转义；用目录名（不含分隔符）匹配最稳。
+// 用 PowerShell 而非 wmic：新版 Windows 已移除 wmic。
+function killBrowserTree(child, profileDir) {
+  if (process.platform !== 'win32') {
+    try { child?.kill('SIGTERM'); } catch {}
+    return;
+  }
+  if (child && child.pid) {
+    try { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
+  }
+  const tag = path.basename(profileDir);
+  const ps = [
+    'Get-CimInstance Win32_Process -Filter "Name=\'msedge.exe\'"',
+    `| Where-Object { $_.CommandLine -like '*${tag}*' }`,
+    '| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }',
+  ].join(' ');
+  try {
+    spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+  } catch {}
+}
+
 async function main() {
   const browser = findBrowser();
   // 每次运行用独立 profile：固定目录名会在上一轮浏览器尚未完全退出时互相争抢，
@@ -4051,13 +4081,7 @@ async function main() {
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");
   } finally {
     try { ws?.close(); } catch {}
-    if (child) {
-      if (process.platform === 'win32') {
-        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      } else {
-        try { child.kill('SIGTERM'); } catch {}
-      }
-    }
+    killBrowserTree(child, profile);
     server.close();
     if (!KEEP) {
       // taskkill 返回时浏览器可能仍有句柄未释放，立刻 rm 会 EBUSY；等一小会儿再清
