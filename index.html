@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.26">
+<meta name="version" content="1.6.27">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.26</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.27</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3747,8 +3747,16 @@
     // 剩下的 restTokens 为空，every() 恒真，于是退化成「列出全库第二季」。
     var wantSeason = null;
     var restTokens = [];
-    kwTokens.forEach(function (t) {
+    kwTokens.forEach(function (t, ti) {
       if (wantSeason) { restTokens.push(t); return; }
+      // 季数只从**最后一个 token** 抽取。季数在语义上永远位于词尾，写
+      // 「心理测量者3 FIRST INSPECTOR」时那个 3 是作品名的一部分（第 3 季的副标题写法），
+      // 不是「第3季」；而条目侧 seasonOfItem 是对**整串**判断的，整串以 INSPECTOR 结尾
+      // 抽不出序号，于是查询侧 any3 vs 条目侧 null 必然不匹配——用自己的名字都搜不到自己。
+      // 全库实测该错位造成中文名 130/137、原名 158 条中的绝大多数失败。
+      // 加这条限制后，中间的 token 一律按关键词做字面匹配（`心理测量者3` 仍能子串命中），
+      // 词尾的真序号照常抽取，两种写法都对。
+      if (ti !== kwTokens.length - 1) { restTokens.push(t); return; }
       var s = extractSeason(t);
       // 单独一个纯数字 token（「间谍过家家 2」里的 "2"）也当季数线索，
       // 但必须满足「左侧已经有主体词」：季数在语义上是主体的后缀，前面没主体就不是季数。

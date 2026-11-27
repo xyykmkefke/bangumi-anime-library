@@ -719,7 +719,7 @@ async function main() {
         const s = P.seasonOfItem(x);
         if (!s || !s.num) continue;
         if (s.kind === 'c') continue;                     // cour 与季不同义，跳过
-        if (/部分|クール|part\s*\d/i.test(cn)) continue;   // 同上，按标题再挡一次
+        if (/部分|クール|part\\s*\\d/i.test(cn)) continue;   // 同上，按标题再挡一次
         // 中文名里必须真的含季数写法，否则数据侧无从对齐
         if (!/[第季期]|season/i.test(cn)) continue;
         // 主体词：剥掉序号片段后剩下的部分，必须够长才不至于命中一大片
@@ -727,8 +727,10 @@ async function main() {
         if (!body || body.length < 2) continue;
         const sameBody = D.filter((y) => (y.cn || '').indexOf(body) >= 0).length;
         if (sameBody < 1 || sameBody > 20) continue;
+        // 上限必须先判后加。写成「先 += 1 再 break」会让计数比实际评估多 1，
+        // 于是 hit === tested 这种全等判据永远差一条，报「399/400」这种假失败。
+        if (e2eTested >= 400) break;   // 取够样本即可，不必跑完整个 1 万条
         e2eTested += 1;
-        if (e2eTested > 400) break;   // 取够样本即可，不必跑完整个 1 万条
         // 统一用「主体 第N季」搜（与库里原写法可能不同，正是要测的点）
         const q = body + ' 第' + s.num + '季';
         const parsed = P.parseQuery(P.searchTokens(N(q)));
@@ -744,11 +746,11 @@ async function main() {
         if (x.p !== '剧场版') continue;
         const cn = x.cn || '';
         if (!cn || cn.length < 4) continue;
-        const body = cn.replace(/^剧场版\s*/, '').replace(/^剧场总集篇/, '').split(/[\s！!～~]/)[0];
+        const body = cn.replace(/^剧场版\\s*/, '').replace(/^剧场总集篇/, '').split(/[\\s！!～~]/)[0];
         if (!body || body.length < 2) continue;
         if (D.filter((y) => (y.cn || '').indexOf(body) >= 0).length < 2) continue;
+        if (tyTested >= 300) break;   // 先判后加，理由同 e2e
         tyTested += 1;
-        if (tyTested > 300) break;
         // 该主体确实存在剧场版分类的条目，且 typeMatchOf 判真
         if (P.typeMatchOf('剧场版', x)) tyOk += 1;
         else if (tyMiss.length < 5) tyMiss.push(cn);
@@ -789,6 +791,68 @@ async function main() {
         out.digitLead.guardOk = !!(target2 && !P.queryFits(badParsed, target2, false));
       }
 
+      // 5) 最根本的不变量：**每条目用自己的中文名搜，必须能搜到自己**。
+      //    这条不依赖任何具体写法假设，只要求「库里有这条、用户照着抄一遍就该找得到」。
+      //    此前它并不成立：parsed 在 token 层面抽季数、seasonOfItem 在整串层面判断，
+      //    「心理测量者3 FIRST INSPECTOR」首 token 以数字结尾被抽成季数 3，而整串以
+      //    INSPECTOR 结尾抽不出序号 → any3 vs null → 用自己的名字都搜不到自己。
+      //    全库曾有 137 条中文名、158 条原名这样失败。修法是「季数只从最后一个 token 抽」。
+      //
+      //    阈值不能设 100%：剩余少数是「同时含季号与 cour」的标题
+      //    （夜樱家的大作战 第二季 第2部分），查询只抽末尾 cour、条目有两个维度，
+      //    属于当前设计的已知边界，不是缺陷。设 99.5% 并写明原因。
+      {
+        let sTested = 0, sOk = 0; const sMiss = [];
+        for (const x of D) {
+          const cn = String(x.cn || '').trim();
+          if (!cn) continue;
+          sTested += 1;
+          const parsed = P.parseQuery(P.searchTokens(N(cn)));
+          if (P.queryFits(parsed, x, false)) sOk += 1;
+          else if (sMiss.length < 6) sMiss.push(cn);
+        }
+        const rate = sTested ? sOk / sTested : 0;
+        out.selfSearch = { tested: sTested, hit: sOk, miss: sMiss, rate: rate };
+      }
+
+      // 6) 误报守卫：末位规则是「收紧」，必须确认没把不相干条目放进来。
+      //    用「主体 第N季」搜，结果里出现的条目其主体必须与查询主体相关。
+      //    比较走 compactText + 抹标点：库里同一作品有「降世神通:」与「降世神通：」
+      //    这类全角/半角差异，直接 indexOf 会把同一部作品误判成无关。
+      {
+        const strip = (v) => P.compactText(N(String(v || ''))).replace(/[\\-－—–~～:：·・\\s]/g, '');
+        let fTested = 0, fBad = 0; const fEx = [];
+        for (const x of D) {
+          const cn = String(x.cn || '');
+          if (!cn || cn.length > 30) continue;
+          const s = P.seasonOfItem(x);
+          if (!s || s.kind === 'c' || !s.num) continue;
+          const body = (s.rest || '').trim();
+          if (!body || body.length < 3) continue;
+          if (D.filter((y) => (y.cn || '').indexOf(body) >= 0).length > 12) continue;
+          if (fTested >= 250) break;
+          fTested += 1;
+          const parsed = P.parseQuery(P.searchTokens(N(body + ' 第' + s.num + '季')));
+          const bodyCore = strip(body);
+          const head = strip(String(body).split(/[\\s第部]/)[0]);
+          const wrong = D.filter((y) => P.queryFits(parsed, y, false)).filter((y) => {
+            const fs = [y.cn, y.n].concat(Array.isArray(y.al) ? y.al : []);
+            if (bodyCore && fs.some((f) => strip(f).indexOf(bodyCore) >= 0)) return false;
+            if (head && head.length >= 3 && fs.some((f) => strip(f).indexOf(head) >= 0)) return false;
+            return true;
+          });
+          if (wrong.length) {
+            fBad += 1;
+            if (fEx.length < 4) fEx.push(body + ' 第' + s.num + '季 → ' + (wrong[0].cn || wrong[0].n)
+              + ' [bodyCore=' + bodyCore + ' head=' + head + ']');
+          }
+        }
+        // 反证：不存在的作品必须 0 结果，否则说明季数判定整体失效、上面的 0 毫无意义
+        const ghost = P.parseQuery(P.searchTokens(N('不存在的作品名xyz 第9季')));
+        out.misreport = { tested: fTested, bad: fBad, ex: fEx,
+          guardOk: D.filter((y) => P.queryFits(ghost, y, false)).length === 0 };
+      }
+
       return JSON.stringify(out);
     })()`);
 
@@ -827,6 +891,31 @@ async function main() {
           '数字开头的作品名不被当作季数',
           d.tested > 0 && d.hit === d.tested && d.guardOk === true,
           `${d.hit}/${d.tested}${d.guardOk === true ? '' : ' 守卫失败'}${(d.miss || []).length ? ' 差:' + d.miss.join(';') : ''}`,
+        );
+      }
+
+      // 最根本的不变量：条目用自己的中文名搜自己必须命中。
+      // 阈值 99.5% 而非 100%：剩余是「同时含季号与 cour」的标题（第二季 第2部分），
+      // 查询只抽末尾 cour、条目有两个维度，属当前设计的已知边界。低于 99.5% 说明
+      // 「查询侧与条目侧判断口径不一致」的错位又回来了，必须 FAIL。
+      {
+        const s = r.selfSearch || { tested: 0, hit: 0, miss: [], rate: 0 };
+        check(
+          '条目用自己的中文名可搜到自己',
+          s.tested >= 5000 && s.rate >= 0.995,
+          `${s.hit}/${s.tested} = ${(s.rate * 100).toFixed(2)}%${(s.miss || []).length ? ' 余:' + s.miss.slice(0, 3).join(',') : ''}`,
+        );
+      }
+
+      // 末位规则是「收紧」改动，必须确认没把不相干条目放进结果。
+      // guardOk 是不存在的作品必须 0 结果——否则说明季数判定整体失效，
+      // 那么「误报 0」只是因为它什么都没匹配上，毫无意义。
+      {
+        const m = r.misreport || { tested: 0, bad: 0, ex: [], guardOk: false };
+        check(
+          '季数筛选不混入无关条目',
+          m.tested > 100 && m.bad === 0 && m.guardOk === true,
+          `${m.bad}/${m.tested} 误报${m.guardOk === true ? '' : ' 守卫失败'}${(m.ex || []).length ? ' 如:' + m.ex[0] : ''}`,
         );
       }
     }
@@ -3916,30 +4005,26 @@ async function main() {
 
     // sw.js 的双份数据清理：两个 CDN 都落过盘时只留主源那份（约省 2.5MB）；
     // 但若只剩备用源那份必须保留——那是该网络环境下唯一的离线副本，删了就再也离线不了。
+    //
+    // 加载方式：从磁盘读出 sw.js 真实源码再注入，**不走网络**。
+    // 早先用 `<script src="sw.js?dedupe=...">` 动态加载，该请求与页面自身的全库补数据、
+    // CDN 竞速并发，实测连跑 3 次里偶发 1 次 `no-fn(load-error)`——属环境抖动而非页面缺陷，
+    // 但会让「发布前验收全绿」这个前提不可靠。读磁盘是确定性的，且仍然是同一份源码。
+    const swSrc = (await readFile(path.join(ROOT, 'sw.js'), 'utf8'));
+    // 只取需要的函数：整份 sw.js 里含 self.addEventListener，注入后不影响断言，
+    // 但会把页面挂上 SW 事件监听。截到 dropDuplicateData 结束即可。
+    const dedupeFn = (() => {
+      const start = swSrc.indexOf('var PRIMARY_DATA_HOST');
+      const end = swSrc.indexOf('// 缓存写入是后台动作');
+      return start >= 0 && end > start ? swSrc.slice(start, end) : '';
+    })();
     const dedupe = await cdp.evaluate(`(async () => {
-      // 以普通脚本加载 sw.js：self 即 window，只定义函数与监听器，不会真的注册 SW。
-      // onerror 直接 reject 会把原生 Event 当错误抛出来，最终只看到「验收异常：Event」
-      // 这种零信息量的提示（实测偶发过一次）。这里改成显式 reason + 重试一次：
-      // 该请求与页面自身的全库补数据/CDN 竞速并发，偶尔会因连接被挤掉而失败，
-      // 属环境抖动而非页面缺陷，不该让整轮验收中断。
-      async function ensureSw() {
-        if (typeof dropDuplicateData === 'function') return 'already';
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          const r = await new Promise((resolve) => {
-            const s = document.createElement('script');
-            s.src = 'sw.js?dedupe=' + Date.now() + '-' + attempt;
-            s.onload = () => resolve(typeof dropDuplicateData === 'function' ? 'ok' : 'loaded-no-fn');
-            s.onerror = () => resolve('load-error');
-            document.head.appendChild(s);
-          });
-          if (r === 'ok') return 'ok';
-          if (r === 'loaded-no-fn') return 'loaded-no-fn';
-          await new Promise((res) => setTimeout(res, 300));
-        }
-        return 'load-error';
-      }
-      const swState = await ensureSw();
-      if (typeof dropDuplicateData !== 'function') return 'no-fn(' + swState + ')';
+      // 源码通过 JSON 传参注入，避免直接把含引号/反引号的文本拼进模板字符串。
+      const SRC = ${JSON.stringify(dedupeFn)};
+      if (!SRC) return 'no-src';
+      // 用 Function 在局部作用域求值，函数名留在闭包里，不污染页面全局。
+      const dropDuplicateData = new Function(SRC + '; return dropDuplicateData;')();
+      if (typeof dropDuplicateData !== 'function') return 'no-fn';
       const NAME = 'yuc-test-dedupe';
       const mk = (host) => 'https://' + host + '/gh/x/y@v1/data/anime-data.js?v=1';
       async function run(urls) {
