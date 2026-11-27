@@ -755,6 +755,40 @@ async function main() {
       }
       out.type = { tested: tyTested, hit: tyOk, miss: tyMiss };
 
+      // 4) 数字开头的作品名不能被当成季数。库里「86 -不存在的战区-」的 86 是作品名本身，
+      //    若把首个纯数字 token 当季数（差一版就是这样），"86 -不存在的战区- 2" 会拿 86
+      //    去比目标条目的 cour 序号 2，直接 0 结果。判据是「裸数字只有当它左侧已经有
+      //    主体词时才是季数」——季数在语义上是主体的后缀，前面没主体只能是标题的一部分。
+      {
+        const CASES = [
+          ['86 -不存在的战区- 2', '86 -不存在的战区- 第2部分'],
+          ['86 2', '86 -不存在的战区- 第2部分'],
+          ['86 不存在的战区 2', '86 -不存在的战区- 第2部分'],
+        ];
+        let dTested = 0, dOk = 0; const dMiss = [];
+        for (const [q, expectCn] of CASES) {
+          const parsed = P.parseQuery(P.searchTokens(N(q)));
+          const target = D.find((x) => (x.cn || '') === expectCn);
+          if (!target) continue;                 // 数据里没有就跳过，不计入分母
+          dTested += 1;
+          // 断言两件事：86 没被当季数，且目标条目真的被判为命中
+          const seasonNum = parsed.wantSeason ? parsed.wantSeason.num : '';
+          const hit = P.queryFits(parsed, target, false);
+          if (seasonNum === '2' && hit) dOk += 1;
+          else dMiss.push(q + '→season=' + (seasonNum || 'null') + ',hit=' + hit);
+        }
+        // 用例数为 0 必须 FAIL：否则数据变化后这条断言会静默空跑（0===0 恒真）
+        out.digitLead = { tested: dTested, hit: dOk, miss: dMiss };
+
+        // 反向验证：模拟「去掉 restTokens.length > 0 前置条件」的旧规则，确认该查询确实会
+        // 回归失败。旧规则是「纯数字 + 还有别的关键词就当季数」，这里直接把 86 手工当成
+        // 季数 86 构造判定，若它仍能命中目标条目，说明这条断言没有在测真问题。
+        const target2 = D.find((x) => (x.cn || '') === '86 -不存在的战区- 第2部分');
+        const badParsed = { typeWant: [], wantSeason: { kind: 'any', num: '86' },
+          restTokens: ['-不存在的战区-'] };
+        out.digitLead.guardOk = !!(target2 && !P.queryFits(badParsed, target2, false));
+      }
+
       return JSON.stringify(out);
     })()`);
 
@@ -784,6 +818,17 @@ async function main() {
         okAll(r.type),
         r.type ? `${r.type.hit}/${r.type.tested}` : seasonRaw,
       );
+      // 数字开头的作品名（86）不能被当季数，否则整条查询会 0 结果。
+      // 带用例数为 0 的守卫与反向验证：guardOk 要求「首个数字被当季数时该查询确实失败」，
+      // 若哪天有人把规则改回去，这一条会立刻 FAIL 而不是静默通过。
+      {
+        const d = r.digitLead || { tested: 0, hit: 0, miss: [] };
+        check(
+          '数字开头的作品名不被当作季数',
+          d.tested > 0 && d.hit === d.tested && d.guardOk === true,
+          `${d.hit}/${d.tested}${d.guardOk === true ? '' : ' 守卫失败'}${(d.miss || []).length ? ' 差:' + d.miss.join(';') : ''}`,
+        );
+      }
     }
 
     // 清空搜索
@@ -3872,17 +3917,29 @@ async function main() {
     // sw.js 的双份数据清理：两个 CDN 都落过盘时只留主源那份（约省 2.5MB）；
     // 但若只剩备用源那份必须保留——那是该网络环境下唯一的离线副本，删了就再也离线不了。
     const dedupe = await cdp.evaluate(`(async () => {
-      // 以普通脚本加载 sw.js：self 即 window，只定义函数与监听器，不会真的注册 SW
-      if (typeof dropDuplicateData !== 'function') {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'sw.js?dedupe=' + Date.now();
-          s.onload = resolve;
-          s.onerror = reject;
-          document.head.appendChild(s);
-        });
+      // 以普通脚本加载 sw.js：self 即 window，只定义函数与监听器，不会真的注册 SW。
+      // onerror 直接 reject 会把原生 Event 当错误抛出来，最终只看到「验收异常：Event」
+      // 这种零信息量的提示（实测偶发过一次）。这里改成显式 reason + 重试一次：
+      // 该请求与页面自身的全库补数据/CDN 竞速并发，偶尔会因连接被挤掉而失败，
+      // 属环境抖动而非页面缺陷，不该让整轮验收中断。
+      async function ensureSw() {
+        if (typeof dropDuplicateData === 'function') return 'already';
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const r = await new Promise((resolve) => {
+            const s = document.createElement('script');
+            s.src = 'sw.js?dedupe=' + Date.now() + '-' + attempt;
+            s.onload = () => resolve(typeof dropDuplicateData === 'function' ? 'ok' : 'loaded-no-fn');
+            s.onerror = () => resolve('load-error');
+            document.head.appendChild(s);
+          });
+          if (r === 'ok') return 'ok';
+          if (r === 'loaded-no-fn') return 'loaded-no-fn';
+          await new Promise((res) => setTimeout(res, 300));
+        }
+        return 'load-error';
       }
-      if (typeof dropDuplicateData !== 'function') return 'no-fn';
+      const swState = await ensureSw();
+      if (typeof dropDuplicateData !== 'function') return 'no-fn(' + swState + ')';
       const NAME = 'yuc-test-dedupe';
       const mk = (host) => 'https://' + host + '/gh/x/y@v1/data/anime-data.js?v=1';
       async function run(urls) {

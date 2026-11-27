@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.25">
+<meta name="version" content="1.6.26">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2508,7 +2508,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.25</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.26</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3751,10 +3751,12 @@
       if (wantSeason) { restTokens.push(t); return; }
       var s = extractSeason(t);
       // 单独一个纯数字 token（「间谍过家家 2」里的 "2"）也当季数线索，
-      // 但仅当还有别的关键词时才这么解释：用户只搜 "2" 时应当按字面匹配。
-      // 不这么处理的话，"2" 会退化成普通关键词，靠子串命中别名里的 "(2025)"
-      // 或拼音里的数字，把不相干的季数也带进来（实测「间谍过家家 2」会混进第三季）。
-      if (!s && /^\d{1,2}$/.test(t) && kwTokens.length > 1) {
+      // 但必须满足「左侧已经有主体词」：季数在语义上是主体的后缀，前面没主体就不是季数。
+      // 早先只判断「还有别的关键词」，结果「86 -不存在的战区- 2」里的 "86"（作品名本身
+      // 就是数字）被当成季数 86，跟目标条目的「第2部分」对不上，整条查询直接 0 结果。
+      // 不加「左侧有主体」的话，"2" 还会退化成普通关键词，靠子串命中别名里的 "(2025)"
+      // 或拼音里的数字，把不相干的季数带进来（实测「间谍过家家 2」会混进第三季）。
+      if (!s && /^\d{1,2}$/.test(t) && restTokens.length > 0) {
         wantSeason = { kind: 'any', num: String(Number(t)) };
         return;
       }
@@ -3842,9 +3844,15 @@
     // 字段侧已归一成简体/半角/平假名，两边永远对不上。这一步不归一，前面全白做。
     var q = normalizeText(state.q.trim());
     var allTokens = searchTokens(q);
-    // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合
-    var tokens = allTokens.filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
-    var excludes = allTokens.filter(function (t) { return t.charAt(0) === '-' && t.length > 1; })
+    // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合。
+    // 判据必须同时排除「首尾都是连字符」的形态：`-不存在的战区-` 是标题里的真实内容
+    // （库里「86 -不存在的战区-」），用户写排除词不会首尾各加一个连字符。
+    // 曾把这类 token 整段当排除词，导致「86 -不存在的战区- 2」搜不到任何结果。
+    function isExcludeToken(t) {
+      return t.charAt(0) === '-' && t.length > 1 && t.charAt(t.length - 1) !== '-';
+    }
+    var tokens = allTokens.filter(function (t) { return !isExcludeToken(t); });
+    var excludes = allTokens.filter(isExcludeToken)
       .map(function (t) { return t.slice(1); });
 
     if (tokens.length || excludes.length) {
