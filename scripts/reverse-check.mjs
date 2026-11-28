@@ -212,7 +212,14 @@ const CASES = [
               var now = myMap[id];
               // 导入之后用户又亲手改过这一条（u 变新了）就不动它——
               // 撤销导入不该顺手把用户导入后的操作一起抹掉
-              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              if (now && pre && pre !== 'tomb-only' && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              // 只写了墓碑、清单里本来就没有这条：撤销就是把墓碑摘掉。
+              // 不能走下面的 \`pre === null\` 分支——那条是「导入新增了条目，撤销要删掉它」，
+              // 方向正好相反（这里 myMap 里本来就没有东西可删）。
+              if (pre === 'tomb-only') {
+                if (!myMap[id] && myDeleted[id]) { clearDeleted(id); rolled += 1; }
+                return;
+              }
               if (pre === null) {
                 // 原本不存在：删掉。同时补墓碑，否则云同步会把这条从远端又拉回来
                 if (myMap[id]) { delete myMap[id]; markDeleted(id); rolled += 1; }
@@ -247,7 +254,7 @@ const CASES = [
   {
     // 缺陷态：撤销导入时无条件回滚，不检查导入后是否被改过
     name: '撤销导入不覆盖导入后被改动过的条目',
-    after: `              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }`,
+    after: `              if (now && pre && pre !== 'tomb-only' && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }`,
     before: `              /* 缺陷态：不检查导入后是否被改动，一律回滚 */`,
   },
   {
@@ -390,6 +397,46 @@ const CASES = [
       return;
     }`,
     before: `    if (e.target.closest('#exportGhostBtnX')) { return; }`,
+  },
+  {
+    // 缺陷态：导出走原始的 Object.keys(myMap)，把库里不存在的幽灵 id 也写进备份。
+    // 界面「收藏 4 部」、导出「已导出 5 部」、导入「跳过 1 条」——同一次往返三个数字。
+    name: '导出条数与界面收藏数一致，且说明有几条未计入',
+    after: `    var ids = Object.keys(myMap).filter(function (id) {
+      return byId.has(id);
+    }).map(function (id) {`,
+    before: `    var ids = Object.keys(myMap).map(function (id) {`,
+  },
+  {
+    // 缺陷态：MD 标题用未过滤的 sortedMine().length，表格却跳过幽灵行 —— 同一个文件里两个数字。
+    name: 'Markdown 导出的「共 N 部」与表格行数一致',
+    after: `    var ids = sortedMine().filter(function (id) { return byId.has(id) && myMap[id]; });`,
+    before: `    var ids = sortedMine();`,
+  },
+  {
+    // 缺陷态：导入不设进度上限，ep=9999 原样写进「总话数 1」的条目。
+    // 而导入取 max、合并也取 max —— 用户之后在界面上再也降不下来。
+    name: '导入的进度超出总话数时按上限收拢并说明',
+    after: `          var tot = Number((byId.get(id) || {}).e) || 0;
+          if (tot > 0 && ep > tot) { ep = tot; epClamped += 1; }`,
+    before: `          /* 缺陷态：不设上限 */`,
+  },
+  {
+    // 缺陷态：导出的 payload 不带 deleted，删除事件完全不跟着备份走。
+    name: '导出的备份带上删除记录（墓碑）',
+    after: `      items: ids,
+      deleted: tombOut
+    };`,
+    before: `      items: ids
+    };`,
+  },
+  {
+    // 缺陷态：导入端忽略备份里的墓碑。
+    name: '换设备导入后删除记录落盘，删掉的条目不会复活',
+    after: `        Object.keys(bakDeleted).forEach(function (id) {
+          if (!/^\\d+$/.test(id)) return;`,
+    before: `        [].forEach(function (id) {
+          if (!/^\\d+$/.test(id)) return;`,
   },
 ];
 

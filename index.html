@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.34">
+<meta name="version" content="1.6.35">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.34</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.35</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -6528,7 +6528,15 @@
       toast('已导出损坏原件（' + raw.length + ' 字节）。原件是未修复的原始内容，请保留备查');
       return;
     }
-    var ids = Object.keys(myMap).map(function (id) {
+    // 只导出库中真实存在的条目：myMap 里可能残留云同步/数据裁剪带回来的旧 id，
+    // 那些条目在界面上根本不显示（「收藏 N 部」用 mineTotal 已把它们排除），
+    // 但导出走的是原始的 Object.keys(myMap)，于是同一份清单出现三个数字：
+    // 界面说「收藏 4 部」、导出提示说「已导出 5 部」、导入回来又说「跳过 1 条无效记录」。
+    // 用户无从判断到底丢没丢东西。更糟的是导出的那份永远不可能被完整导入。
+    // 那些 id 也不该在这里被「救回来」——库里没有它，导入端 skipped 计数就是证据。
+    var ids = Object.keys(myMap).filter(function (id) {
+      return byId.has(id);
+    }).map(function (id) {
       var entry = myMap[id] || {};
       return {
         id: Number(id),
@@ -6538,15 +6546,34 @@
         updatedAt: entry.u || entry.t || 0
       };
     });
+    // 幽灵记录的数量要说出来，但用的是「不计入备份」的措辞——
+    // 静默少导出等于让用户以为备份完整，而那几条他其实还能在原设备上看到。
+    var ghostSkipped = Object.keys(myMap).length - ids.length;
+    // 墓碑也要带走：它记录的是「我删过这条」，是唯一能阻止云同步把条目拉回来的凭证。
+    // 不带的话，「导出备份 -> 换设备导入」会把在原设备上删掉的条目全部复活——
+    // 实测导出的 JSON 里 hasDeleted:false，换设备导入后本地墓碑为空。
+    // 只带「与当前清单不冲突」的那些：清单里有的条目如果也有墓碑，说明是删了又加回来，
+    // 留着这条墓碑反而会让下一次同步把它再删一次。
+    var tombOut = {};
+    Object.keys(myDeleted).forEach(function (id) {
+      if (myMap[id]) return;
+      var ts = Number(myDeleted[id]) || 0;
+      if (ts) tombOut[id] = ts;
+    });
     var payload = {
       app: 'yuc-anime-list',
-      version: 2,
+      // 3：格式与云同步的 buildPayload 对齐（都带 deleted）。导入端对 v2 仍然兼容
+      // （没有 deleted 字段就当作空对象），所以升这个号不会打断旧备份。
+      version: 3,
       exportedAt: new Date().toISOString(),
-      items: ids
+      items: ids,
+      deleted: tombOut
     };
     download('我的番剧-' + stamp() + '.json', JSON.stringify(payload, null, 2), 'application/json');
     markBackup();
-    toast('已导出 ' + ids.length + ' 部番剧');
+    toast('已导出 ' + ids.length + ' 部番剧' +
+      (Object.keys(tombOut).length ? '和 ' + Object.keys(tombOut).length + ' 条删除记录' : '') +
+      (ghostSkipped ? '（另有 ' + ghostSkipped + ' 条记录不在当前数据库中，未计入备份）' : ''));
   });
 
   $('exportCsv').addEventListener('click', function () {
@@ -6571,7 +6598,11 @@
   });
 
   $('exportMd').addEventListener('click', function () {
-    var ids = sortedMine();
+    // sortedMine() 返回的是原始的 myMap 键，含库中不存在的幽灵记录。
+    // 下面的表格用 `if (!x || !e) return` 把那些行跳过了，而这里用 ids.length 写「共 N 部」——
+    // 于是标题说「共 5 部」、表格只有 4 行。同一个文件里两个数字对不上，
+    // 用户会以为导出丢了内容（或者表格少渲染了）。先按 byId 过滤，让标题与表格同源。
+    var ids = sortedMine().filter(function (id) { return byId.has(id) && myMap[id]; });
     var lines = [
       '# 我的番剧',
       '',
@@ -6610,6 +6641,19 @@
         var added = 0;
         var merged = 0;
         var skipped = 0;
+        // 备份里的墓碑：导出端（exportBtn）从 v1.6.35 起会带上 deleted。
+        // 不带的话，「删除」这个事件完全不跟着备份走——用户导出备份、换设备导入，
+        // 在原设备上删掉的条目会在新设备上重新出现（实测 delKeys 为空）。
+        // 但也不能无条件采信：备份可能是几个月前的，直接把它里面的删除执行一遍
+        // 等于用旧状态覆盖新操作（备用越好用，丢得越多）。所以只接收「比本地清单里
+        // 这条记录的更新时间更晚」的墓碑——那才是「删掉之后没有新的修改」。
+        var bakDeleted = (parsed && !Array.isArray(parsed) && parsed.deleted &&
+          typeof parsed.deleted === 'object') ? parsed.deleted : {};
+        var tombCutoff = Date.now() + 864e5;   // 与下面的时间戳上限同一条线
+        var tombApplied = 0;
+        var tombIgnored = 0;
+        var preImport = {};
+        var touched = {};
         // 导入前把**受影响条目**的原始状态记下来，供撤销精确回滚。
         // 导入的语义是「合并」：已有条目的进度取 max，新条目直接放入——
         // 两者都不可逆。尤其是进度取 max 这一步，用户导入一份旧的（或别的设备的）
@@ -6619,12 +6663,22 @@
         // 改过的条目不会被一并抹掉（与清空撤销同一个理由）。
         var preImport = {};
         var touched = {};
+        // 导入的进度也必须受「总话数」约束——界面上 setEp 有 cap（超界会提示「已限制为 N 话」），
+        // 而这里原来一行 Math.max 就放行。实测：总话数 1 话的番，界面输入 9999 被截成 1，
+        // 导入一份 ep=9999 的备份却原样写进 9999，界面显示「9999 / 1 话」。
+        // 更麻烦的是导入之后降不回去：导入取 max，合并也取 max，用户只能靠改数据库改回来。
+        // 越界的来源通常不是恶意，而是旧版本、别的设备、手工改过的备份。
+        var epClamped = 0;
         raw.forEach(function (entry, index) {
           var isObj = entry && typeof entry === 'object';
           var id = String(isObj ? entry.id : entry);
           if (!byId.has(id)) { skipped += 1; return; }
           var status = isObj && STATUS[entry.status] ? entry.status : 'done';
           var ep = Math.max(0, Math.round(Number(isObj && entry.ep) || 0));
+          // 与 setEp 同一条上限：total 未知（0）时保留 9999 的宽松上限，
+          // 不用 Math.min(ep, 0) 把「库里没有总话数」误当成「一话都没有」。
+          var tot = Number((byId.get(id) || {}).e) || 0;
+          if (tot > 0 && ep > tot) { ep = tot; epClamped += 1; }
           var cur = myMap[id];
           if (!cur) {
             // 走 normalizeEntry 而不是就地拼对象：后者不过滤 addedAt/updatedAt，
@@ -6660,6 +6714,50 @@
             touched[id] = true;
           }
         });
+        // 套用备份里的墓碑。判据与 mergeRemote 完全一致（tomb >= u 才算删除），
+        // 这样「导入一份备份」和「从云端拉一次」对同一条记录给出同样的结果——
+        // 两条路径口径不同的话，用户会看到「云同步删掉了、导入又变回来」这种反复。
+        Object.keys(bakDeleted).forEach(function (id) {
+          if (!/^\d+$/.test(id)) return;
+          var ts = Number(bakDeleted[id]) || 0;
+          if (!ts || ts > tombCutoff) { tombIgnored += 1; return; }
+          var local = myMap[id];
+          if (!local) {
+            // 本地清单里没有这条 —— 这正是「换设备」的主场景，不能跳过：
+            // 新设备的清单本来就是空的，而墓碑是唯一能阻止云同步把这条从远端
+            // 拉回来的凭证。跳过的话导入等于没导入：删掉的东西过一会儿又出现了，
+            // 而用户以为备份已经完整恢复了。
+            // 前提是本地**也没有**更新的墓碑去反驳它：已有的本地墓碑若更晚，
+            // 保留本地那个（更晚的删除覆盖更早的删除，没有语义差别但时间要取大）。
+            var curTomb = Number(myDeleted[id]) || 0;
+            if (ts > curTomb) {
+              // 直接赋值会绕过持久化：markDeleted 内部才调 persistDeleted。
+              // 只改内存的话，导入完成、刷新一次墓碑就没了，条目随即被云同步拉回来——
+              // 而这正是本条要修的那个现象。用 markDeleted 让它自己落盘。
+              markDeleted(id);
+              tombApplied += 1;
+              // 「原来没有墓碑」的情形必须能撤销，否则用户点完导入发现少了几部
+              // （而那几部在新设备上本来就没有，是被墓碑挡住不再出现），却没有任何入口撤回。
+              // 'tomb-only' 与 null 必须分开：null 是「导入新增了条目，撤销要删掉它」，
+              // 这里 myMap 里本来就没有东西可删，撤销只需摘掉墓碑。
+              if (!curTomb) { preImport[id] = 'tomb-only'; touched[id] = true; }
+            } else { tombIgnored += 1; }
+            return;
+          }
+          var localU = Number(local.u) || Number(local.t) || 0;
+          // 备份里的删除早于本地最后一次修改 -> 那是「删了又加回来」，不能删
+          if (ts < localU) { tombIgnored += 1; return; }
+          // 记进撤销快照，撤销时能把这批一起恢复
+          preImport[id] = { s: local.s, t: local.t, ep: local.ep, u: local.u };
+          touched[id] = true;
+          delete myMap[id];
+          // markDeleted 不接受时间戳：它取 max(now, 条目的 u) + 1。这里已经 delete 了，
+          // 所以取到的是 now + 1，必然大于任何现存 u ——「导入时执行了这次删除」这件事
+          // 就该以导入的时刻为准，而不是沿用备份里可能更旧的时间（更旧的墓碑在
+          // 跨设备同步时可能被判定为「删除早于修改」而复活）。
+          markDeleted(id);
+          tombApplied += 1;
+        });
         // 墓碑损坏时一并重置：syncNow 在 deletedCorrupt 时会拒绝同步，
         // 而导入只写 STORAGE_KEY、不碰 DEL_KEY，于是「导出备份后重新导入」
         // 这句提示会变成死循环——导入完还是同步不了。导入的语义就是
@@ -6679,7 +6777,11 @@
         // 但这里再明确说一句，避免 skin 上出现「未保存：导入完成」这种自相矛盾的话
         if (!ok) return;
         var summary = '导入完成：新增 ' + added + ' 部，合并 ' + merged + ' 部' +
-          (skipped ? '，跳过 ' + skipped + ' 条无效记录' : '');
+          (tombApplied ? '，按备份删除 ' + tombApplied + ' 部' : '') +
+          (skipped ? '，跳过 ' + skipped + ' 条无效记录' : '') +
+          // 剪过就说剪过：用户拿旧设备/旧版本的备份来恢复，进度被剪掉是事实，
+          // 不说的话他会以为导入不完整，或者下次看到「进度变少了」以为是丢数据。
+          (epClamped ? '，' + epClamped + ' 部进度超出总话数已按上限收拢' : '');
         // 一条都没动就不给撤销按钮：一个点了什么都不会发生的按钮比没有更差
         if (!Object.keys(touched).length) {
           toast(summary);
@@ -6695,7 +6797,14 @@
               var now = myMap[id];
               // 导入之后用户又亲手改过这一条（u 变新了）就不动它——
               // 撤销导入不该顺手把用户导入后的操作一起抹掉
-              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              if (now && pre && pre !== 'tomb-only' && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              // 只写了墓碑、清单里本来就没有这条：撤销就是把墓碑摘掉。
+              // 不能走下面的 `pre === null` 分支——那条是「导入新增了条目，撤销要删掉它」，
+              // 方向正好相反（这里 myMap 里本来就没有东西可删）。
+              if (pre === 'tomb-only') {
+                if (!myMap[id] && myDeleted[id]) { clearDeleted(id); rolled += 1; }
+                return;
+              }
               if (pre === null) {
                 // 原本不存在：删掉。同时补墓碑，否则云同步会把这条从远端又拉回来
                 if (myMap[id]) { delete myMap[id]; markDeleted(id); rolled += 1; }

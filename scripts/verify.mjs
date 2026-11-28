@@ -4740,12 +4740,18 @@ async function main() {
     const importIds = await cdp.evaluate(`(() => {
       const D = window.__searchProbe.data();
       const a = String(D[5].i), b = String(D[6].i);
+      // 导入的进度现在受总话数约束（与界面 setEp 同一条上限），所以这里不能写死 12：
+      // 若这条番只有 12 话以下，12 会被收拢，importEp 就不再等于 12，
+      // 这条断言会以「撤销没生效」的样子失败。取一个必然合法的值：
+      // 总话数已知就取 min(12, 总话数)，未知（e=0）时 12 本来就被放行。
+      const totalA = Number(D[5].e) || 0;
+      const bump = totalA > 0 ? Math.min(12, totalA) : 12;
       localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
-        [a]: { s: 'doing', t: 1700000000000, ep: 2, u: 1700000001000 }
+        [a]: { s: 'doing', t: 1700000000000, ep: Math.min(2, bump - 1) >= 0 ? Math.min(2, Math.max(0, bump - 1)) : 0, u: 1700000001000 }
       }));
       localStorage.removeItem('yuc_deleted_v1');
       localStorage.removeItem('yuc_prefs_v1');
-      return JSON.stringify({ a, b });
+      return JSON.stringify({ a, b, bump });
     })()`).catch((e) => e.message);
     await cdp.send('Page.reload');
     for (let i = 0; i < 60; i += 1) {
@@ -4756,12 +4762,12 @@ async function main() {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const IDS = ${JSON.stringify(importIds)};
       if (typeof IDS !== 'string') return { err: '前置失败' };
-      const { a: A, b: B } = JSON.parse(IDS);
+      const { a: A, b: B, bump: BUMP } = JSON.parse(IDS);
       const before = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
       // 走真实入口：构造 File 塞进 #fileInput 再派发 change
       const backup = { items: [
-        { id: A, status: 'done', ep: 12 },   // 已有条目：进度会被推高
-        { id: B, status: 'want', ep: 0 }     // 新条目
+        { id: A, status: 'done', ep: BUMP },   // 已有条目：进度会被推高（BUMP 已按总话数收过）
+        { id: B, status: 'want', ep: 0 }       // 新条目
       ] };
       const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
       const dt = new DataTransfer();
@@ -4780,6 +4786,7 @@ async function main() {
       return {
         beforeEp: before[A] && before[A].ep,
         importEp: afterImport[A] && afterImport[A].ep,
+        bump: BUMP,
         importAddedB: !!afterImport[B],
         hasUndo,
         undoEp: afterUndo[A] && afterUndo[A].ep,
@@ -4789,7 +4796,8 @@ async function main() {
     })()`).catch((e) => ({ err: e.message }));
     check('导入备份有撤销，且把进度回滚到导入前',
       importRes && importRes.hasUndo === true &&
-      importRes.beforeEp === 2 && importRes.importEp === 12 && importRes.undoEp === 2,
+      importRes.beforeEp === Math.min(2, Math.max(0, importRes.bump - 1)) &&
+      importRes.importEp === importRes.bump && importRes.undoEp === importRes.beforeEp,
       JSON.stringify(importRes));
     // 撤销新增条目时必须补墓碑，否则云同步会把这条从远端又拉回来。
     // 这与上一条是两个独立性质：只测「进度回滚」的话，一个「删了但不写墓碑」的实现会全绿通关。
@@ -4818,7 +4826,8 @@ async function main() {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const IDS = ${JSON.stringify(importIds)};
       const A = JSON.parse(IDS).a;
-      const backup = { items: [{ id: A, status: 'done', ep: 12 }] };
+      const BUMP = JSON.parse(IDS).bump;
+      const backup = { items: [{ id: A, status: 'done', ep: BUMP }] };
       const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
       const dt = new DataTransfer();
       dt.items.add(file);
@@ -4841,11 +4850,11 @@ async function main() {
       u.click();
       await sleep(650);
       const after = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[A];
-      return { importEp, afterEp: after && after.ep,
+      return { importEp, bump: BUMP, afterEp: after && after.ep,
         toast: (document.getElementById('toast').textContent || '').slice(0, 60) };
     })()`).catch((e) => ({ err: e.message }));
     check('撤销导入不覆盖导入后被改动过的条目',
-      dirtyUndo && dirtyUndo.importEp === 12 && dirtyUndo.afterEp === 12 &&
+      dirtyUndo && dirtyUndo.importEp === dirtyUndo.bump && dirtyUndo.afterEp === dirtyUndo.bump &&
       /未回滚/.test(dirtyUndo.toast || ''),
       JSON.stringify(dirtyUndo));
 
@@ -4853,8 +4862,11 @@ async function main() {
     const noopRes = await cdp.evaluate(`(() => {
       const IDS = ${JSON.stringify(importIds)};
       const A = JSON.parse(IDS).a;
+      // 种子进度也要按总话数收：若这条番只有 3 话，写 ep:9 本身就已是越界值，
+      // 而「导入无改动」的前提是本地进度已 >= 备份进度，越界值会让这个前提失真。
+      const BUMP = JSON.parse(IDS).bump;
       localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
-        [A]: { s: 'doing', t: 1700000000000, ep: 9, u: 1700000001000 }
+        [A]: { s: 'doing', t: 1700000000000, ep: BUMP, u: 1700000001000 }
       }));
       localStorage.removeItem('yuc_deleted_v1');
       return 1;
@@ -4869,7 +4881,8 @@ async function main() {
       const IDS = ${JSON.stringify(importIds)};
       const A = JSON.parse(IDS).a;
       // 备份进度比本地小 → 合并取 max 后没有任何变化
-      const backup = { items: [{ id: A, status: 'doing', ep: 1 }] };
+      // 备份进度取 0：本地已是 BUMP（>=0），合并取 max 后必然无变化
+      const backup = { items: [{ id: A, status: 'doing', ep: 0 }] };
       const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
       const dt = new DataTransfer();
       dt.items.add(file);
@@ -4879,11 +4892,12 @@ async function main() {
       await sleep(750);
       return {
         hasUndo: !!document.getElementById('toastAct'),
+        bump: JSON.parse(IDS).bump,
         ep: JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[A].ep
       };
     })()`).catch((e) => ({ err: e.message }));
     check('导入无实际改动时不提供撤销按钮',
-      noopImport && noopImport.hasUndo === false && noopImport.ep === 9,
+      noopImport && noopImport.hasUndo === false && noopImport.ep === noopImport.bump,
       JSON.stringify(noopImport));
 
     // ---- 视图容量与写失败可见（2026-11-28 第五轮） ----
@@ -5064,8 +5078,10 @@ async function main() {
       try { p = JSON.parse(captured); } catch (e) { p = null; }
       return { fname: fname || '', isJson: !!p && Array.isArray(p.items), version: p && p.version };
     })()`).catch((e) => ({ err: e.message }));
+    // 版本号从 2 升到 3：导出格式与云同步的 buildPayload 对齐（都带 deleted）。
+    // 导入端仍兼容 v2（没有 deleted 就当空对象），所以老备份不会失效。
     check('清单正常时导出仍是 JSON 备份',
-      normalExport && normalExport.isJson === true && normalExport.version === 2 && /\.json$/.test(normalExport.fname),
+      normalExport && normalExport.isJson === true && normalExport.version === 3 && /\.json$/.test(normalExport.fname),
       JSON.stringify(normalExport));
 
     // ② 墓碑写失败时：toast 要说「删除标记未保存」，且顶部有不会被覆盖的常驻提示
@@ -5326,17 +5342,226 @@ async function main() {
       HTMLAnchorElement.prototype.click = origClick;
       let p = null;
       try { p = JSON.parse(captured); } catch (e) { p = null; }
+      const tt = document.getElementById('toast').textContent || '';
       return {
         fname: fname || '',
         isJson: !!p && Array.isArray(p.items),
         n: p && p.items ? p.items.length : 0,
         hasExportBtn: true,
+        toast: tt.slice(0, 110),
+        toldWhyZero: /不在当前数据库中，未计入备份/.test(tt),
       };
     })()`).catch((e) => ({ err: e.message }));
-    check('幽灵记录空态里的「导出备份核对」按钮真的触发导出',
+    // 幽灵空态下导出的条数必然是 0：那几条记录压根不在库里，写进备份也不可能被导回来。
+    // 所以这里验的不是「导出了几条」，而是「点了真的会导出、而且说清了为什么是 0」——
+    // 一份静默的 items:[] 会让用户以为备份完整，实际什么都没存。
+    check('幽灵记录空态里的「导出备份核对」按钮真的触发导出并说明为何为空',
       ghostExport && ghostExport.hasExportBtn === true && ghostExport.isJson === true &&
-      ghostExport.n === 2 && /\.json$/.test(ghostExport.fname || ''),
+      ghostExport.n === 0 && ghostExport.toldWhyZero === true &&
+      /\.json$/.test(ghostExport.fname || ''),
       JSON.stringify(ghostExport));
+
+    // ===== 第八轮：往返一致性 =====
+    // 前七轮都在查「界面上发生了什么」，这一轮查「导出再导入之后还是不是原来那样」。
+    // 这类缺陷的特点是：当场看不出来，要等用户换设备、重装、或者几个月后恢复备份
+    // 才显形——那时他已经没有原始数据可以对照了。
+
+    // ① 导出条数必须与界面上的收藏数一致（幽灵记录不能计入备份）
+    // 实测：界面「收藏 4 部」、导出提示「已导出 5 部」、导入回来「跳过 1 条无效记录」，
+    // 同一次往返三个数字。用户会以为自己丢了东西，或者备份不完整。
+    await cdp.evaluate(`(async () => {
+      const all = document.querySelector('.tab[data-tab="all"]');
+      if (all) all.click();
+      let cards = [];
+      for (let i = 0; i < 40; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'));
+        if (cards.length >= 3) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const ids = cards.slice(0, 3).map((c) => c.dataset.id);
+      const now = Date.now();
+      const m = {};
+      m[ids[0]] = { s: 'want', t: now, ep: 0, u: now };
+      m[ids[1]] = { s: 'doing', t: now, ep: 0, u: now };
+      m['999999002'] = { s: 'done', t: now, ep: 1, u: now };   // 幽灵
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(m));
+      localStorage.setItem('yuc_deleted_v1', JSON.stringify({ '888888002': now }));
+      localStorage.removeItem('yuc_prefs_v1');
+    })()`);
+    await cdp.send('Page.reload');
+    await sleep(2400);
+    const ghostExportCount = await cdp.evaluate(`(async () => {
+      let captured = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader(); fr.onload = () => { captured = String(fr.result); }; fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {};
+      const mine = document.querySelector('.tab[data-tab="mine"]');
+      if (mine) mine.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const stat = document.getElementById('statCount').textContent;
+      const badge = document.getElementById('mineCount').textContent;
+      const exp = document.getElementById('exportBtn');
+      if (exp) { exp.hidden = false; exp.click(); }
+      await new Promise((r) => setTimeout(r, 800));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      let p = null; try { p = JSON.parse(captured); } catch (e) {}
+      const toastText = (document.getElementById('toast').textContent || '');
+      return {
+        stat, badge,
+        exported: p && p.items ? p.items.length : -1,
+        ids: p && p.items ? p.items.map((x) => String(x.id)) : [],
+        toast: toastText.slice(0, 100),
+        mentionsGhost: /不在当前数据库中，未计入备份/.test(toastText),
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('导出条数与界面收藏数一致，且说明有几条未计入',
+      ghostExportCount && ghostExportCount.stat === '2' && ghostExportCount.badge === '2' &&
+      ghostExportCount.exported === 2 &&
+      ghostExportCount.ids.indexOf('999999002') < 0 &&
+      ghostExportCount.mentionsGhost === true,
+      JSON.stringify(ghostExportCount));
+
+    // ② Markdown 导出的「共 N 部」必须等于表格实际行数
+    // 标题用未过滤的 sortedMine().length，表格里 `if (!x || !e) return` 跳过了幽灵，
+    // 同一个文件里两个数字对不上。
+    const mdCount = await cdp.evaluate(`(async () => {
+      let captured = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader(); fr.onload = () => { captured = String(fr.result); }; fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {};
+      const btn = document.getElementById('exportMd');
+      if (!btn) { URL.createObjectURL = origCreate; HTMLAnchorElement.prototype.click = origClick; return { __noBtn: true }; }
+      btn.click();
+      await new Promise((r) => setTimeout(r, 800));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      const txt = String(captured || '');
+      const head = txt.match(/共\\s*(\\d+)\\s*部/);
+      // 表格行 = 以 | [ 开头的行（内容是链接），排除表头与分隔行
+      const rows = txt.split('\\n').filter((l) => /^\\|\\s*\\[/.test(l)).length;
+      return { declared: head ? Number(head[1]) : -1, rows };
+    })()`).catch((e) => ({ err: e.message }));
+    check('Markdown 导出的「共 N 部」与表格行数一致',
+      mdCount && mdCount.declared === 2 && mdCount.rows === 2,
+      JSON.stringify(mdCount));
+
+    // ③ 导入的进度必须受总话数约束（与界面 setEp 同一条上限）
+    // 实测：总话数 1 话的番，界面输入 9999 被截成 1 并提示「已限制为 1 话」，
+    // 而导入一份 ep=9999 的备份原样写进 9999，界面显示「9999 / 1 话」。
+    // 更麻烦的是导入后降不回去：导入取 max、合并也取 max。
+    const epClamp = await cdp.evaluate(`(async () => {
+      // 总话数得从库里取，不能从卡片 DOM 上读：.eptotal 只在「我的番剧」页渲染
+      // （进度控件是那一页独有的），在「全部番剧」页 querySelector 恒为 null，
+      // 断言会以 __noTotal 的形式「假跳过」——看着像前置失败，实际是取错了地方。
+      // window.__searchProbe.data() 是页面自己暴露的全库视图，取 e 字段即可。
+      const D = window.__searchProbe.data();
+      const withTotal = D.filter((x) => Number(x.e) > 0);
+      if (!withTotal.length) return { __noTotal: true };
+      const pickOne = withTotal.find((x) => Number(x.e) <= 13) || withTotal[0];
+      const target = String(pickOne.i), total = Number(pickOne.e);
+      const payload = {
+        app: 'yuc-anime-list', version: 2, exportedAt: new Date().toISOString(),
+        items: [{ id: Number(target), status: 'doing', addedAt: Date.now() - 9000, ep: 9999, updatedAt: Date.now() - 9000 }],
+      };
+      const input = document.getElementById('fileInput');
+      const file = new File([JSON.stringify(payload)], 'over.json', { type: 'application/json' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 1200));
+      const mine = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const tt = document.getElementById('toast').textContent || '';
+      return {
+        id: target, total,
+        storedEp: mine[target] ? mine[target].ep : null,
+        toast: tt.slice(0, 110),
+        mentionsClamp: /超出总话数已按上限收拢/.test(tt),
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('导入的进度超出总话数时按上限收拢并说明',
+      epClamp && epClamp.total > 0 && epClamp.storedEp === epClamp.total &&
+      epClamp.storedEp !== 9999 && epClamp.mentionsClamp === true,
+      JSON.stringify(epClamp));
+
+    // ④ 换设备场景：备份里的墓碑必须写进本地，否则删掉的条目会被同步拉回来
+    // 实测修复前：导出 hasDeleted:false；即便带上，导入端 `if (!local) return` 也会
+    // 在「新设备清单为空」时跳过——而那正是需要墓碑的唯一场景。
+    const tombTravel = await cdp.evaluate(`(async () => {
+      const now = Date.now();
+      const all = document.querySelector('.tab[data-tab="all"]');
+      if (all) all.click();
+      let cards = [];
+      for (let i = 0; i < 40; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'));
+        if (cards.length >= 2) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (cards.length < 2) return { __noCards: cards.length };
+      const ids = cards.slice(0, 2).map((c) => c.dataset.id);
+      // 「原设备」：清单里有 A，墓碑里有 B（B 在原设备上被删掉了）
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [ids[0]]: { s: 'want', t: now - 3000, ep: 0, u: now - 3000 },
+      }));
+      localStorage.setItem('yuc_deleted_v1', JSON.stringify({ [ids[1]]: now }));
+      return { ids };
+    })()`).catch(() => ({}));
+    await cdp.send('Page.reload');
+    await sleep(2400);
+    const tombExport = await cdp.evaluate(`(async () => {
+      let captured = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader(); fr.onload = () => { captured = String(fr.result); }; fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {};
+      const exp = document.getElementById('exportBtn');
+      if (exp) { exp.hidden = false; exp.click(); }
+      await new Promise((r) => setTimeout(r, 800));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      let p = null; try { p = JSON.parse(captured); } catch (e) {}
+      return { raw: String(captured || ''), hasDeleted: !!(p && p.deleted), deletedKeys: p && p.deleted ? Object.keys(p.deleted) : [] };
+    })()`).catch((e) => ({ err: e.message }));
+    check('导出的备份带上删除记录（墓碑）',
+      tombExport && tombExport.hasDeleted === true && (tombExport.deletedKeys || []).length === 1,
+      JSON.stringify({ hasDeleted: tombExport && tombExport.hasDeleted, deletedKeys: tombExport && tombExport.deletedKeys }));
+
+    // ⑤ 换设备导入：清空之后导入那份备份，墓碑要落盘
+    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_deleted_v1');");
+    await cdp.send('Page.reload');
+    await sleep(2300);
+    const tombArrive = await cdp.evaluate(`(async () => {
+      const raw = ${JSON.stringify('__RAW__')};
+      const input = document.getElementById('fileInput');
+      const file = new File([raw], 'backup.json', { type: 'application/json' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 1300));
+      const mine = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const del = JSON.parse(localStorage.getItem('yuc_deleted_v1') || '{}');
+      return {
+        mineIds: Object.keys(mine), delKeys: Object.keys(del),
+        toast: (document.getElementById('toast').textContent || '').slice(0, 110),
+        hasUndo: !!document.getElementById('toastAct'),
+      };
+    })()`.replace('"__RAW__"', JSON.stringify(String(tombExport && tombExport.raw || '')))).catch((e) => ({ err: e.message }));
+    check('换设备导入后删除记录落盘，删掉的条目不会复活',
+      tombArrive && (tombArrive.delKeys || []).length === 1 &&
+      (tombArrive.mineIds || []).length === 1 &&
+      /按备份删除/.test(tombArrive.toast || ''),
+      JSON.stringify(tombArrive));
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");
