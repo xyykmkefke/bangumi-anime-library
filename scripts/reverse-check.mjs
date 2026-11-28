@@ -100,6 +100,79 @@ const CASES = [
     after: `<span id="resultLive" role="status" aria-live="polite" aria-atomic="true"><b id="resultCount">0</b><span id="resultLabel"></span></span>`,
     before: `<span id="resultLive"><b id="resultCount">0</b><span id="resultLabel"></span></span>`,
   },
+  // ---- 第三轮（2026-11-28）：撤销链路完整性 ----
+  {
+    // 缺陷态：后台提示在撤销窗口期内直接覆盖 toast 容器 → 撤销按钮被 innerHTML='' 清掉
+    name: '撤销窗口期内后台提示排队，且不销毁撤销计时器',
+    after: `    if (!action && opts && opts.quiet && toastAction && Date.now() < toastAction.until) {
+      toastQueue = msg;
+      return;
+    }`,
+    before: `    /* 缺陷态：不排队，后台提示直接覆盖掉撤销按钮 */`,
+  },
+  {
+    // 缺陷态：无条件推迟一切提示 → 用户点分享/导出后 5 秒内毫无反馈
+    name: '撤销窗口期只推迟后台提示，不推迟用户操作反馈',
+    after: `    if (!action && opts && opts.quiet && toastAction && Date.now() < toastAction.until) {`,
+    before: `    if (!action && toastAction && Date.now() < toastAction.until) {`,
+  },
+  {
+    // 缺陷态：清空撤销用整体替换 → 抹掉窗口期内的并发新增
+    name: '清空后撤销不抹掉期间的并发新增',
+    after: `        Object.keys(snapshot).forEach(function (id) {
+          // 已被重新加入的点保留现在那条（可能是用户在别处改了状态），不覆盖
+          if (!myMap[id]) myMap[id] = snapshot[id];
+        });`,
+    before: `        myMap = snapshot;`,
+  },
+  {
+    // 缺陷态：先清掉计时器再排队 → 撤销条永不自动收起（且排队提示永不补显示）
+    // 注意保留排队逻辑本身，只把 clearTimeout 提前：这样「按钮还在」仍成立，
+    // 但「按时收起 / 补显示」必然失败，精准命中目标断言。
+    name: '撤销条到期自动收起',
+    after: `    if (!action && opts && opts.quiet && toastAction && Date.now() < toastAction.until) {
+      toastQueue = msg;
+      return;
+    }
+    clearTimeout(toastTimer);`,
+    before: `    clearTimeout(toastTimer);
+    if (!action && opts && opts.quiet && toastAction && Date.now() < toastAction.until) {
+      toastQueue = msg;
+      return;
+    }`,
+  },
+  {
+    // 缺陷态：卡片长按菜单「移出」不给撤销（第三轮修复前原样）
+    name: '卡片长按菜单「移出」有撤销',
+    after: `      toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''), {
+        label: '撤销',
+        fn: function () {
+          myMap[id] = rprev;
+          clearDeleted(id);
+          if (!saveMine()) return;
+          render();
+          toast('已恢复：' + (ritem ? (ritem.cn || ritem.n || '') : ''));
+        }
+      });`,
+    before: `      toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''));`,
+  },
+  {
+    // 缺陷态：详情页「移出」不给撤销（第三轮修复前原样）
+    name: '详情页「移出」有撤销',
+    after: `      toast('已移除：' + name, {
+        label: '撤销',
+        fn: function () {
+          myMap[id] = dprev;
+          clearDeleted(id);
+          if (!saveMine()) return;
+          render();
+          // 详情可能已经关掉或切到别的番剧了，只在还停在这一部时才重绘
+          if (modalId === id) renderDetail(id);
+          toast('已恢复：' + name);
+        }
+      });`,
+    before: `      toast('已移除：' + name);`,
+  },
 ];
 
 function run(cmd, args, opts = {}) {
@@ -116,9 +189,14 @@ async function main() {
   const original = await fs.readFile(HTML, 'utf8');
   const results = [];
   // --only=关键词 只跑名称包含该关键词的 case：单条排查时不必等整套 16 分钟
+  // 支持逗号分隔多个关键词（--only=A,B），方便按批次反向验证而不用开并行
+  // ——每个 case 都会改写 index.html，并行必然互相踩踏。
   const onlyArg = process.argv.find((a) => a.indexOf('--only=') === 0);
   const only = onlyArg ? onlyArg.slice('--only='.length) : '';
-  const cases = only ? CASES.filter((c) => c.name.indexOf(only) >= 0) : CASES;
+  const keys = only ? only.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const cases = keys.length
+    ? CASES.filter((c) => keys.some((k) => c.name.indexOf(k) >= 0))
+    : CASES;
 
   for (const c of cases) {
     if (original.indexOf(c.after) < 0) {

@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.29">
+<meta name="version" content="1.6.30">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.29</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.30</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2937,8 +2937,20 @@
     return true;
   }
 
-  function toast(msg, action) {
-    clearTimeout(toastTimer);
+  // toast 是单例容器（innerHTML = ''），任何后续提示都会把上一个的「撤销」按钮一并删掉。
+  // 清空 / 批量操作只给 5 秒反悔期，而这段时间里云同步完成、其他标签页合并、进度写入
+  // 都可能弹一条普通提示 —— 撤销入口就此永久消失，用户明明看到了「已清空 12 部」，
+  // 回过神来按钮已经没了。
+  //
+  // 但也不能一刀切推迟所有提示：用户点「分享」/「导出」后要立刻看到结果，
+  // 拖 5 秒等于点了没反应（第一版就是这样，把两条既有分享断言打挂了）。
+  // 所以只有**后台自发**的提示（云同步完成、其他标签页合并）用 quiet 标记，
+  // 它们本来就不需要即时性，推迟到撤销窗口结束后再说；用户操作产生的提示立即显示，
+  // 覆盖掉撤销按钮也可以接受——那是用户自己主动做的事。
+  var toastAction = null;  // { until } 当前带按钮的提示的展示截止时间
+  var toastQueue = null;   // 被推迟的后台提示文案
+
+  function toast(msg, action, opts) {
     // 落盘刚失败过（8 秒内）就把任何提示降级成「未保存」。
     // 调用方普遍是「saveMine(); toast('已加入…')」的写法，不检查返回值，
     // 成功文案会立刻盖掉 saveMine 里的失败提示——用户看到「已加入」、
@@ -2947,6 +2959,14 @@
       msg = '未保存：' + msg + '（本地存储不可用，详见顶部提示）';
       action = null;
     }
+    // 撤销窗口期内的**后台**提示排队，等窗口结束再显示。
+    // 这个 return 必须发生在下面的 clearTimeout 之前：撤销提示自己的计时器要留着，
+    // 否则它再也不会自动收起，变成一个永久挂在屏幕上的撤销条。
+    if (!action && opts && opts.quiet && toastAction && Date.now() < toastAction.until) {
+      toastQueue = msg;
+      return;
+    }
+    clearTimeout(toastTimer);
     toastEl.innerHTML = '';
     var text = document.createElement('span');
     text.textContent = msg;
@@ -2960,13 +2980,26 @@
       btn.addEventListener('click', function () {
         clearTimeout(toastTimer);
         toastEl.classList.remove('show');
+        toastAction = null;
         action.fn();
       });
       toastEl.appendChild(btn);
       wait = 5000;
+      toastAction = { until: Date.now() + wait };
+    } else {
+      toastAction = null;
     }
     toastEl.classList.add('show');
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, wait);
+    toastTimer = setTimeout(function () {
+      toastEl.classList.remove('show');
+      toastAction = null;
+      // 被推迟的提示在撤销窗口结束后补上，不静默丢弃
+      if (toastQueue) {
+        var q = toastQueue;
+        toastQueue = null;
+        setTimeout(function () { toast(q); }, 200);
+      }
+    }, wait);
   }
 
   // ---- 备份提示：有收藏时提示是否导出过，导出后记录时间 ----
@@ -3041,7 +3074,7 @@
       if (localStorage.getItem(WARN_KEY) === today) return;
       localStorage.setItem(WARN_KEY, today);
     } catch (e) { /* 忽略存储失败 */ }
-    toast('已有 ' + n + ' 处改动，建议导出一次备份');
+    toast('已有 ' + n + ' 处改动，建议导出一次备份', null, { quiet: true });
   }
 
   // ---- URL hash 状态：刷新、分享后都能还原筛选条件 ----
@@ -5881,12 +5914,24 @@
     var id = menuCardId;
     if (removeBtn && id) {
       var ritem = byId.get(id);
+      var rprev = myMap[id];
       delete myMap[id];
       markDeleted(id);
       saveMine();
       closeCardMenu();
-      toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''));
       render();
+      // 同一个「移出我的番剧」，卡片右下角按钮（toggleMine）有撤销，长按菜单里却没有——
+      // 用户在哪一侧误触，后果完全不同：按钮上能救回来，菜单里直接丢。补齐成一致的。
+      toast('已移出我的番剧：' + (ritem ? (ritem.cn || ritem.n || '') : ''), {
+        label: '撤销',
+        fn: function () {
+          myMap[id] = rprev;
+          clearDeleted(id);
+          if (!saveMine()) return;
+          render();
+          toast('已恢复：' + (ritem ? (ritem.cn || ritem.n || '') : ''));
+        }
+      });
       return;
     }
     if (statusBtn && id) {
@@ -5970,18 +6015,37 @@
     var id = modalId;
     var item = byId.get(id);
     if (!item) return;
+    var name = item.cn || item.n;
     if (myMap[id]) {
+      var dprev = myMap[id];
       delete myMap[id];
       markDeleted(id);
-      toast('已移除：' + (item.cn || item.n));
-    } else {
-      myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
-      clearDeleted(id);
-      toast('已加入我的番剧：' + (item.cn || item.n));
+      saveMine();
+      render();
+      renderDetail(id);
+      // 详情页里的「移出」此前点完就没了退路，且按钮当场变成「加入我的番剧」，
+      // 用户想反悔只能重新加入——那会得到一条全新记录（进度归零、加入时间变成现在）。
+      // 与卡片按钮保持一致：给撤销，且撤销要把原记录（含进度 / 状态 / 加入时间）原样放回。
+      toast('已移除：' + name, {
+        label: '撤销',
+        fn: function () {
+          myMap[id] = dprev;
+          clearDeleted(id);
+          if (!saveMine()) return;
+          render();
+          // 详情可能已经关掉或切到别的番剧了，只在还停在这一部时才重绘
+          if (modalId === id) renderDetail(id);
+          toast('已恢复：' + name);
+        }
+      });
+      return;
     }
+    myMap[id] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+    clearDeleted(id);
     saveMine();
     render();
     renderDetail(id);
+    toast('已加入我的番剧：' + name);
   });
 
   $('detailShare').addEventListener('click', function () {
@@ -6477,9 +6541,17 @@
       label: '撤销',
       fn: function () {
         ids.forEach(clearDeleted);
-        myMap = snapshot;
+        // 逐条写回，不能用 `myMap = snapshot` 整体替换：
+        // 清空到点撤销之间（最长 5 秒）可能有云同步拉回、其他标签页合并、
+        // 甚至用户自己新加入的条目，整体替换会把这些一笔抹掉。
+        // 单测实测：清空后另一标签页加入 1 部，点撤销 -> 只剩那 1 部，
+        // 原来 2 部全丢（finalCount=1，restoredOriginals=false）。
+        Object.keys(snapshot).forEach(function (id) {
+          // 已被重新加入的点保留现在那条（可能是用户在别处改了状态），不覆盖
+          if (!myMap[id]) myMap[id] = snapshot[id];
+        });
         persistDeleted();
-        saveMine();
+        if (!saveMine()) return;
         render();
         toast('已恢复 ' + ids.length + ' 部');
       }
@@ -6877,12 +6949,12 @@
       saveSyncCfg(cfg, epoch);
       markBackup();
       setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
-      if (!silent) toast('云同步完成');
+      if (!silent) toast('云同步完成', null, { quiet: true });
       return true;
     }).catch(function (err) {
       var msg = err && err.message ? err.message : '同步失败';
       setSyncStatus(msg, 'err');
-      if (!silent) toast('同步失败：' + msg);
+      if (!silent) toast('同步失败：' + msg, null, { quiet: true });
       scheduleSyncRetry(err);
       return false;
     }).then(function (ok) {
@@ -7307,7 +7379,8 @@
     if (!changed && !diskMisaligned) return;
     saveMine({ fromSync: true });
     render();
-    toast(changed ? '已合并其他标签页的追番改动' : '已修复被覆盖的追番清单');
+    // 后台自发：另一标签页改动合并进来，不需要即时性
+    toast(changed ? '已合并其他标签页的追番改动' : '已修复被覆盖的追番清单', null, { quiet: true });
   });
 
   // 只读探针：仅供自动化验收使用。有了它，测试可以直接跑线上这套真实的

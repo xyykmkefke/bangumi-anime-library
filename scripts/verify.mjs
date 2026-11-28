@@ -4441,6 +4441,246 @@ async function main() {
       dedupe,
     );
 
+    // ---- 撤销链路完整性（2026-11-28 第三轮审计） ----
+    // 这一批断言都走页面真实入口：真的点按钮 / 真的派发长按 / 真的点 toast 上的撤销，
+    // 不另抄一份「如果是我会怎么恢复」的逻辑。教训：断言里自带一份实现，
+    // 缺陷态照样能 PASS（曾出现 5558/5558 全绿而实际全错）。
+
+    // ⑧ 撤销按钮不能被后续后台提示销毁。
+    //    toast 是单例容器，第一件事就是 innerHTML = ''，而撤销窗口有 5 秒——
+    //    这期间云同步完成、其他标签页合并都会弹一条后台提示。
+    const undoSrc = await readFile(path.join(ROOT, 'index.html'), 'utf8');
+    const toastFnStart = undoSrc.indexOf('function toast(msg, action, opts)');
+    const toastFnEnd = undoSrc.indexOf('function backupAt()');
+    const toastFn = toastFnStart >= 0 && toastFnEnd > toastFnStart
+      ? undoSrc.slice(toastFnStart, toastFnEnd) : '';
+    // 排队判断必须发生在 clearTimeout 之前：若先 clearTimeout 再 return，
+    // 撤销提示的 5 秒计时器已经被清掉，而按钮又没被覆盖 —— 撤销条会永久挂在屏幕上。
+    const qIdx = toastFn.indexOf('toastQueue = msg;');
+    const ctIdx = toastFn.indexOf('clearTimeout(toastTimer);');
+    check('撤销窗口期内后台提示排队，且不销毁撤销计时器',
+      toastFn !== '' && qIdx > 0 && ctIdx > qIdx,
+      `queue@${qIdx} clearTimeout@${ctIdx}`);
+    // 边界性质与主性质是两个独立断言：只有后台提示该排队，
+    // 用户主动操作（分享/导出/检查更新）必须立即反馈，否则「点了没反应」。
+    check('撤销窗口期只推迟后台提示，不推迟用户操作反馈',
+      /opts\.quiet/.test(toastFn) && !/if \(!action && toastAction/.test(toastFn),
+      /opts\.quiet/.test(toastFn) ? '按 quiet 标记区分' : '仍在无条件推迟');
+
+    // 行为验证（不只是看源码）：清空 → 期间来一条普通提示 → 撤销按钮仍在且是同一个节点
+    const undoLive = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const DATA = window.__searchProbe.data();
+      const ids = [String(DATA[10].i), String(DATA[11].i)];
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [ids[0]]: { s: 'doing', t: Date.now(), ep: 3, u: Date.now() },
+        [ids[1]]: { s: 'want', t: Date.now(), ep: 0, u: Date.now() }
+      }));
+      localStorage.removeItem('yuc_prefs_v1');
+      return ids.length;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const undoAlive = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      window.confirm = () => true;
+      location.hash = '#tab=mine&y=all&v=grid';
+      await sleep(900);
+      const clearBtn = document.getElementById('clearBtn');
+      if (!clearBtn) return { err: '无 #clearBtn' };
+      const before = Object.keys(JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')).length;
+      clearBtn.click();
+      await sleep(300);
+      const btn0 = document.getElementById('toastAct');
+      const afterClear = Object.keys(JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')).length;
+      if (!btn0) return { err: '清空后没有撤销按钮', before, afterClear };
+      // 撤销窗口期内来一条普通提示：走 storage 事件（与真实「另一标签页合并」同一路径）
+      const DATA = window.__searchProbe.data();
+      const otherId = String(DATA[200].i);
+      const cur = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      cur[otherId] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(cur));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'yuc_my_anime_v1', newValue: JSON.stringify(cur), storageArea: localStorage
+      }));
+      await sleep(500);
+      const btn1 = document.getElementById('toastAct');
+      const survived = !!btn1;
+      const sameNode = btn1 === btn0;
+      // 真的点下去，验证撤销有效且不抹掉期间的新增
+      if (btn1) btn1.click();
+      await sleep(500);
+      const finalMap = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const finalIds = Object.keys(finalMap);
+      return {
+        before, afterClear, survived, sameNode,
+        finalCount: finalIds.length,
+        originalsBack: finalIds.length >= before,
+        otherKept: finalIds.indexOf(otherId) >= 0
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('撤销窗口期内的普通提示不会销毁撤销按钮',
+      undoAlive && undoAlive.survived === true && undoAlive.sameNode === true,
+      JSON.stringify(undoAlive));
+    // 反向性质：撤销不能把「清空到撤销之间」的并发新增一并抹掉。
+    // 单测实测缺陷态 finalCount=1 / originalsBack=false —— 原来 2 部全丢。
+    check('清空后撤销不抹掉期间的并发新增',
+      undoAlive && undoAlive.afterClear === 0 &&
+      undoAlive.originalsBack === true && undoAlive.otherKept === true,
+      JSON.stringify(undoAlive));
+
+    // ⑨ 撤销条必须按时收起，被排队的普通提示必须补显示（不能静默丢弃）。
+    //    这条防「撤销条永不走」：计时器被清掉后按钮既不会自动隐藏、也不会被覆盖。
+    const queued = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const DATA = window.__searchProbe.data();
+      const ids = [String(DATA[30].i), String(DATA[31].i)];
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [ids[0]]: { s: 'doing', t: Date.now(), ep: 1, u: Date.now() },
+        [ids[1]]: { s: 'want', t: Date.now(), ep: 0, u: Date.now() }
+      }));
+      return ids.length;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const queueRes = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      window.confirm = () => true;
+      location.hash = '#tab=mine&y=all&v=grid';
+      await sleep(900);
+      const clearBtn = document.getElementById('clearBtn');
+      if (!clearBtn) return { err: '无 #clearBtn' };
+      clearBtn.click();
+      await sleep(300);
+      if (!document.getElementById('toastAct')) return { err: '清空后没有撤销按钮' };
+      const DATA = window.__searchProbe.data();
+      const otherId = String(DATA[300].i);
+      const cur = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      cur[otherId] = { s: 'want', t: Date.now(), ep: 0, u: Date.now() };
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(cur));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'yuc_my_anime_v1', newValue: JSON.stringify(cur), storageArea: localStorage
+      }));
+      await sleep(400);
+      // 等过 5 秒撤销窗口
+      await sleep(5400);
+      const el = document.getElementById('toast');
+      const txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+      return {
+        btnGone: !document.getElementById('toastAct'),
+        txt: txt.slice(0, 40),
+        // 排队提示是「已合并其他标签页的追番改动」这类普通文案，不含「撤销」
+        queuedShown: txt.length > 0 && txt.indexOf('撤销') < 0
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('撤销条到期自动收起，且被排队的普通提示会补显示',
+      queueRes && queueRes.btnGone === true && queueRes.queuedShown === true,
+      JSON.stringify(queueRes));
+
+    // ⑩ 同一个「移出我的番剧」，卡片按钮 / 卡片长按菜单 / 详情页三个入口都该有撤销。
+    //    此前只有卡片按钮有，另两个入口点完即丢，且详情页按钮当场变成「加入」，
+    //    用户想反悔只能重新加入 —— 那会得到一条全新记录（进度归零、加入时间变成现在）。
+    const entryPick = await cdp.evaluate(`(() => {
+      const DATA = window.__searchProbe.data();
+      const id = String(DATA[5].i);
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [id]: { s: 'doing', t: 1700000000000, ep: 7, u: 1700000001000 }
+      }));
+      localStorage.removeItem('yuc_prefs_v1');
+      return id;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    // 卡片长按菜单
+    const menuUndo = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      location.hash = '#tab=mine&y=all&v=grid';
+      await sleep(900);
+      const cards = [].slice.call(document.querySelectorAll('#grid .card'));
+      if (!cards.length) return { err: '无卡片' };
+      const card = cards[0];
+      const id = card.dataset.id;
+      const r = card.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const pd = (type) => card.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerType: 'touch'
+      }));
+      pd('pointerdown');
+      await sleep(750);
+      pd('pointerup');
+      await sleep(300);
+      const removeBtn = document.getElementById('cardMenuRemove');
+      if (!removeBtn || removeBtn.hidden) return { err: '菜单里没有移出按钮' };
+      removeBtn.click();
+      await sleep(350);
+      const hasUndo = !!document.getElementById('toastAct');
+      if (hasUndo) document.getElementById('toastAct').click();
+      await sleep(450);
+      const back = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[id];
+      return {
+        hasUndo, restored: !!back,
+        exact: !!back && back.s === 'doing' && back.ep === 7 && back.t === 1700000000000
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('卡片长按菜单「移出」有撤销，且恢复原进度/状态/加入时间',
+      menuUndo && menuUndo.hasUndo === true && menuUndo.exact === true,
+      JSON.stringify(menuUndo));
+
+    // 详情页（需要重置回已收藏态）
+    await cdp.evaluate(`(() => {
+      const DATA = window.__searchProbe.data();
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [String(DATA[5].i)]: { s: 'done', t: 1700000000000, ep: 12, u: 1700000001000 }
+      }));
+    })()`).catch(() => {});
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const detailUndo = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      location.hash = '#tab=mine&y=all&v=grid';
+      await sleep(900);
+      const cards = [].slice.call(document.querySelectorAll('#grid .card'));
+      if (!cards.length) return { err: '无卡片' };
+      const id = cards[0].dataset.id;
+      const link = cards[0].querySelector('.card-link');
+      if (!link) return { err: '无详情链接' };
+      link.click();
+      await sleep(600);
+      const toggle = document.getElementById('detailToggle');
+      if (!toggle) return { err: '无详情按钮' };
+      const beforeText = toggle.textContent;
+      toggle.click();
+      await sleep(400);
+      const hasUndo = !!document.getElementById('toastAct');
+      const textAfterRemove = toggle.textContent;
+      if (hasUndo) document.getElementById('toastAct').click();
+      await sleep(450);
+      const back = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[id];
+      return {
+        beforeText, hasUndo, textAfterRemove,
+        textAfterUndo: toggle.textContent,
+        exact: !!back && back.s === 'done' && back.ep === 12 && back.t === 1700000000000
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('详情页「移出」有撤销，撤销后按钮与记录同时回滚',
+      detailUndo && detailUndo.hasUndo === true && detailUndo.exact === true &&
+      detailUndo.textAfterRemove === '加入我的番剧' &&
+      detailUndo.textAfterUndo === '移出我的番剧',
+      JSON.stringify(detailUndo));
+
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");
   } finally {
