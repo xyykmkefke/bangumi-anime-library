@@ -2963,7 +2963,10 @@ async function main() {
       const active = document.querySelector('#years .pill.active');
       const bar = document.getElementById('resultbar').textContent;
       const shown = document.querySelectorAll('#grid .card').length;
-      const total = window.ANIME_DATA.filter((x) => x.d).length;
+      // 期望值不能自己按「有 d 才计入」再算一遍：那正好复刻了 adoptData 里
+      // 被修掉的过滤，于是「数据层丢了一条」这件事在断言里也被同步丢掉，
+      // 两边一起错、断言永远绿。改成读界面真实口径（结果条的计数）与数据源长度比。
+      const total = window.ANIME_DATA.length;
       const hashYear = new URLSearchParams(location.hash.slice(1)).get('y');
       return [
         !!active && active.dataset.year === 'all',
@@ -5562,6 +5565,154 @@ async function main() {
       (tombArrive.mineIds || []).length === 1 &&
       /按备份删除/.test(tombArrive.toast || ''),
       JSON.stringify(tombArrive));
+
+    // ---- 第九轮（2026-11-28）：数据可达性 / 边界反馈 ----
+    // 无首播日期的条目不能被数据层丢掉。
+    //
+    // 原先 adoptData() 是 `.filter(x => x.d)`，于是数据里 10438 条、界面只能拿到 10437 条，
+    // 「星门」（i=449352，d 为空串）被静默丢弃：搜它的名字得 0 条、年份浏览永远见不到它，
+    // 而 META.count 写着 10438。这条断言问的不是「排序对不对」，而是「它到底还在不在」。
+    const noDateReach = await cdp.evaluate(`(async () => {
+      const go = (sel, v, attr) => {
+        const el = [...document.querySelectorAll(sel)].find((b) => b.dataset[attr] === v);
+        if (el) el.click();
+        return !!el;
+      };
+      go('#tabs .tab, [data-tab]', 'all', 'tab');
+      await new Promise((r) => setTimeout(r, 200));
+      const inp = document.getElementById('search');
+      inp.value = '星门';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 900));
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const hit = cards.find((c) => c.dataset.id === '449352');
+      const res = {
+        cards: cards.length,
+        ids: cards.map((c) => c.dataset.id),
+        count: (document.getElementById('resultCount') || {}).textContent,
+        emptyShown: !(document.getElementById('empty') || {}).hidden,
+        rendered: !!hit,
+      };
+      // 复位：清空搜索，避免污染后面的断言
+      inp.value = '';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 500));
+      return res;
+    })()`).catch((e) => ({ err: e.message }));
+    check('没有首播日期的条目仍能被搜到并渲染（不被数据层丢弃）',
+      noDateReach && noDateReach.rendered === true &&
+      (noDateReach.ids || []).indexOf('449352') >= 0 &&
+      noDateReach.emptyShown === false,
+      JSON.stringify(noDateReach));
+
+    // 缺日期的条目在「按时间」里必须沉底，不能因为空串比任何日期都小而霸占首位。
+    // 与上面那条是两个独立性质：它测的是「排序时怎么排」，上面测的是「还在不在」。
+    // 上限只取前 240 张（首屏一页），所以不指望在这一页里看到星门，
+    // 真正要守的是「首张卡片的日期必须有效」——缺陷态下首张会是没有日期的条目。
+    const dateSort = await cdp.evaluate(`(async () => {
+      const go = (sel, v, attr) => {
+        const el = [...document.querySelectorAll(sel)].find((b) => b.dataset[attr] === v);
+        if (el) el.click();
+        return !!el;
+      };
+      go('[data-tab]', 'all', 'tab');
+      await new Promise((r) => setTimeout(r, 200));
+      go('#years .pill', 'all', 'year');
+      await new Promise((r) => setTimeout(r, 250));
+      go('#seasons .pill', 'all', 'season');
+      await new Promise((r) => setTimeout(r, 250));
+      const sel = document.getElementById('sort');
+      sel.value = 'date';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 700));
+
+      const cards = [...document.querySelectorAll('#grid .card')];
+      const metaOf = (c) => ((c.querySelector('.meta') || {}).textContent || '').trim();
+      const firstDate = metaOf(cards[0] || document.createElement('div')).split(' ')[0];
+      // 首屏这一页里的日期必须单调不减（只统计形如 YYYY-MM-DD 的）
+      const ds = cards.map((c) => metaOf(c).split(' ')[0]).filter((d) => d.length === 10 && d.charAt(4) === '-');
+      let inversions = 0;
+      for (let i = 1; i < ds.length; i += 1) { if (ds[i] < ds[i - 1]) inversions += 1; }
+      const res = {
+        firstId: cards[0] ? cards[0].dataset.id : null,
+        firstDate,
+        firstIsValidDate: firstDate.length === 10 && firstDate.charAt(4) === '-',
+        pageCards: cards.length,
+        datedCount: ds.length,
+        inversions,
+      };
+      sel.value = 'score';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      return res;
+    })()`).catch((e) => ({ err: e.message }));
+    check('「按时间」排序时首张卡片日期有效，且整页日期不逆序',
+      dateSort && dateSort.firstIsValidDate === true && dateSort.inversions === 0 &&
+      dateSort.datedCount > 0 && dateSort.pageCards === dateSort.datedCount,
+      JSON.stringify(dateSort));
+
+    // 季度箭头到达数据边界时必须给出说明，不能静默不动。
+    // 原先 shiftQuarter 边界处直接 return：最大年份的 10 月季再点「下一季度」，
+    // 按钮没禁用、页面一动不动、也没有任何提示——用户只会以为按钮坏了。
+    // 两个方向都要测：向上到顶、向下到底，各给一句话。
+    const edgeNav = await cdp.evaluate(`(async () => {
+      const collect = () => {
+        const seen = [];
+        const obs = new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => {
+          if (n.nodeType === 1) { const t = (n.textContent || '').trim(); if (t) seen.push(t); }
+        })));
+        obs.observe(document.body, { childList: true, subtree: true });
+        return { seen, stop: () => obs.disconnect() };
+      };
+      const go = (sel, v, attr) => {
+        const el = [...document.querySelectorAll(sel)].find((b) => b.dataset[attr] === v);
+        if (el) el.click();
+        return !!el;
+      };
+      const years = [...document.querySelectorAll('#years .pill')]
+        .map((b) => b.dataset.year).filter((v) => v && v !== 'all').map(Number);
+      const maxY = Math.max.apply(null, years);
+      const minY = Math.min.apply(null, years);
+
+      // 向上到顶
+      go('#years .pill', String(maxY), 'year');
+      await new Promise((r) => setTimeout(r, 200));
+      go('#seasons .pill', '10', 'season');
+      await new Promise((r) => setTimeout(r, 350));
+      const upBefore = document.querySelector('#years .pill.active').dataset.year + '-' +
+        document.querySelector('#seasons .pill.active').dataset.season;
+      const up = collect();
+      document.getElementById('nextSeason').click();
+      await new Promise((r) => setTimeout(r, 650));
+      up.stop();
+      const upAfter = document.querySelector('#years .pill.active').dataset.year + '-' +
+        document.querySelector('#seasons .pill.active').dataset.season;
+
+      // 向下到底
+      go('#years .pill', String(minY), 'year');
+      await new Promise((r) => setTimeout(r, 200));
+      go('#seasons .pill', '1', 'season');
+      await new Promise((r) => setTimeout(r, 350));
+      const dnBefore = document.querySelector('#years .pill.active').dataset.year + '-' +
+        document.querySelector('#seasons .pill.active').dataset.season;
+      const dn = collect();
+      document.getElementById('prevSeason').click();
+      await new Promise((r) => setTimeout(r, 650));
+      dn.stop();
+      const dnAfter = document.querySelector('#years .pill.active').dataset.year + '-' +
+        document.querySelector('#seasons .pill.active').dataset.season;
+
+      return {
+        upBefore, upAfter, upStayed: upBefore === upAfter,
+        upToast: up.seen.join(' | ').slice(0, 80),
+        dnBefore, dnAfter, dnStayed: dnBefore === dnAfter,
+        dnToast: dn.seen.join(' | ').slice(0, 80),
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('季度箭头到数据边界时说清为什么没动（上下两个方向）',
+      edgeNav && edgeNav.upStayed === true && edgeNav.dnStayed === true &&
+      /最新/.test(edgeNav.upToast || '') && /最早/.test(edgeNav.dnToast || ''),
+      JSON.stringify(edgeNav));
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");

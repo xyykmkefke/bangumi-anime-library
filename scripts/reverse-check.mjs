@@ -438,6 +438,34 @@ const CASES = [
     before: `        [].forEach(function (id) {
           if (!/^\\d+$/.test(id)) return;`,
   },
+  // ---- 第九轮（2026-11-28）：数据可达性 / 边界反馈 ----
+  {
+    // 缺陷态：按「有没有首播日期」过滤数据，无日期的条目全被丢掉。
+    // 这是 v1.1.0 就存在的原始写法，直到本轮才认清它不是「数据清洗」而是「数据丢失」。
+    name: '没有首播日期的条目仍能被搜到并渲染',
+    after: `    DATA = (window.ANIME_DATA || []).slice();`,
+    before: `    DATA = (window.ANIME_DATA || []).filter(function (x) { return x.d; });`,
+  },
+  {
+    // 缺陷态：让空日期用空串直接参与 localeCompare，于是它比任何日期都小、霸占首位。
+    // 只改「全部番剧」那条分支，不动 mineSort 分支：两者是独立实现，
+    // 若把两处一起回退，就分不清到底哪一处被断言覆盖了。
+    name: '「按时间」排序时首张卡片日期有效',
+    after: `          var ad = String(a.d || '');
+          var bd = String(b.d || '');
+          if (!ad !== !bd) return ad ? -1 : 1;
+          return ad.localeCompare(bd);
+        });`,
+    before: `          return String(a.d).localeCompare(String(b.d));
+        });`,
+  },
+  {
+    // 缺陷态：季度箭头在数据边界静默 return，用户点了没反应也没有任何解释。
+    name: '季度箭头到数据边界时说清为什么没动',
+    after: `      toast(delta > 0 ? '已经是数据里最新的季度了' : '已经是数据里最早的季度了');
+      return;`,
+    before: `      return;`,
+  },
 ];
 
 function run(cmd, args, opts = {}) {

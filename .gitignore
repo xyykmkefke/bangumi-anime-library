@@ -6,6 +6,8 @@ data/build/
 
 # 依赖与工具产物
 node_modules/
+# 诊断脚本用的临时浏览器 profile（每次跑都新建、正常会自删，中断时会残留）
+.tmp-*
 .DS_Store
 Thumbs.db
 

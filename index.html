@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.35">
+<meta name="version" content="1.6.36">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.35</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.36</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2646,7 +2646,20 @@
   var byId = new Map();
 
   function adoptData() {
-    DATA = (window.ANIME_DATA || []).filter(function (x) { return x.d; });
+    // 不能按「有没有首播日期」过滤掉条目。
+    //
+    // 这里原来是 `.filter(function (x) { return x.d; })`，代价是：数据里 10438 条，
+    // 界面只能拿到 10437 条——「星门」（i=449352，d 为空串）被静默丢弃。
+    // 它既不在 DATA 也不在 byId，于是用户搜「星门」得 0 条结果、按年份浏览永远看不到它，
+    // 而它明明在数据文件里、在 Bangumi 上也真实存在。META.count 写着 10438，
+    // 界面上能访问到的却永远少一条，两个数字对不上却没有一处解释。
+    //
+    // 当初加这行的动机是「没有日期就没法归到某年某季」。但这不该用丢弃来解决：
+    // 下面所有用到 d 的地方都已按「缺失」稳妥处理——calendarHtml 有「日期待定」列、
+    // timelineHtml 归到 '0000-0' 组、cardHtml 的 meta 用 filter(Boolean) 跳过空值、
+    // 年份/季度筛选在 d 为空时自然匹配不到（等价于「不属于任何年季」）。
+    // 唯一没处理的是排序会把它排到最前，那在 sortList 里单独兜住。
+    DATA = (window.ANIME_DATA || []).slice();
     byId = new Map(DATA.map(function (x) { return [String(x.i), x]; }));
   }
 
@@ -3502,7 +3515,15 @@
       if (idx > 3) { idx = 0; year += 1; }
       if (idx < 0) { idx = 3; year -= 1; }
     }
-    if (year < start || year > end) return;
+    if (year < start || year > end) {
+      // 到头了要说一声，不能静默返回。
+      // 原先这里直接 `return`：在最大年份的 10 月季再点「下一季度」，按钮既没禁用、
+      // 也没有任何提示，页面一动不动——用户的第一反应是「按钮坏了」或「卡住了」，
+      // 而不是「已经到最新一季」。这和「说了但做不到」是同一类问题的镜像：
+      // 做了但不说。到边界不是错误状态，但必须让用户知道为什么没反应。
+      toast(delta > 0 ? '已经是数据里最新的季度了' : '已经是数据里最早的季度了');
+      return;
+    }
     state.year = String(year);
     state.season = seq[idx];
     renderYears();
@@ -4097,7 +4118,13 @@
           return String(a.cn || a.n).localeCompare(String(b.cn || b.n), 'zh');
         }
         if (mineSort === 'date') {
-          return String(a.d).localeCompare(String(b.d)) || (eb.t || 0) - (ea.t || 0);
+          // 空日期不能当空串参与 localeCompare：'' 比任何 'YYYY-MM-DD' 都小，
+          // 于是没有首播日期的条目在「按首播时间」里霸占第一位，看起来像是
+          // 1990 年之前的老番。库里就有这样一条（「星门」）。缺日期的一律沉到末尾。
+          var ad = String(a.d || '');
+          var bd = String(b.d || '');
+          if (!ad !== !bd) return ad ? -1 : 1;
+          return ad.localeCompare(bd) || (eb.t || 0) - (ea.t || 0);
         }
         return (eb.t || 0) - (ea.t || 0);
       });
@@ -4106,7 +4133,14 @@
       case 'heat':
         return copy.sort(function (a, b) { return (b.h || 0) - (a.h || 0); });
       case 'date':
-        return copy.sort(function (a, b) { return String(a.d).localeCompare(String(b.d)); });
+        return copy.sort(function (a, b) {
+          // 同上：缺首播日期的沉到最后。升序时用户是想「从最早的开始看」，
+          // 把一个日期未知的条目放在最前面，等于凭空声称它比 1990 年还早。
+          var ad = String(a.d || '');
+          var bd = String(b.d || '');
+          if (!ad !== !bd) return ad ? -1 : 1;
+          return ad.localeCompare(bd);
+        });
       case 'name':
         return copy.sort(function (a, b) { return String(a.cn || a.n).localeCompare(String(b.cn || b.n), 'zh'); });
       default:

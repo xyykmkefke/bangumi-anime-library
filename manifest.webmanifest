@@ -2,7 +2,7 @@
   "name": "番剧库 · 我的追番",
   "short_name": "番剧库",
   "description": "本地优先的番剧浏览与追番清单",
-  "version": "1.6.35",
+  "version": "1.6.36",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
