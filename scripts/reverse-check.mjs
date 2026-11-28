@@ -177,20 +177,24 @@ const CASES = [
   {
     // 缺陷态：删除视图既无撤销也无提示（第四轮修复前原样，splice 完直接重绘）
     name: '删除已保存视图有撤销',
-    after: `      toast('已删除视图：' + gone.name, {
+    after: `      renderViewsMenu();
+      // 保存的视图是用户手搭出来的筛选组合，删掉就得重搭一遍——此前既没有撤销，
+      // 连提示都没有，点错一下悄无声息地没了
+      toast('已删除视图：' + gone.name, {
         label: '撤销',
         fn: function () {
           var cur = loadViews();
           // 按原下标插回；若期间又删了别的视图导致下标失效，就放回末尾
           if (idx >= 0 && idx <= cur.length) cur.splice(idx, 0, gone);
           else cur.push(gone);
-          saveViews(cur);
+          if (!saveViews(cur)) { toast('撤销失败：本地存储不可用'); return; }
           renderViewsMenu();
           toast('已恢复视图：' + gone.name);
         }
       });
       return;`,
-    before: `      return;`,
+    before: `      renderViewsMenu();
+      return;`,
   },
   {
     // 缺陷态：导入不提供撤销（第四轮修复前原样：只报一句结果就完事）。
@@ -253,6 +257,47 @@ const CASES = [
           return;
         }`,
     before: `        /* 缺陷态：不判断是否有实际改动，总是给撤销按钮 */`,
+  },
+  // ---- 第五轮（2026-11-28）：视图容量与写失败可见 ----
+  {
+    // 缺陷态：超出上限静默挤掉，提示只说「已保存」（第五轮修复前原样）
+    name: '视图超出上限时提示点名被挤掉的条目',
+    after: `      var msg = '已保存视图：' + name.trim();
+      if (evicted.length) {
+        var names = evicted.map(function (v) { return v.name; }).filter(Boolean);
+        msg = '已保存视图：' + name.trim() + '（超出 ' + VIEWS_MAX + ' 个上限，' +
+          (names.length ? '已挤掉：' + names.join('、') : '已挤掉最早 ' + evicted.length + ' 个') + '）';
+      }`,
+    before: `      var msg = '已保存视图：' + name.trim();`,
+  },
+  {
+    // 缺陷态：保存视图不给撤销（挤掉了就找不回来）
+    name: '撤销保存视图能把被挤掉的旧视图拿回来',
+    after: `      toast(msg, {
+        label: '撤销',
+        fn: function () {
+          // 直接按「删掉刚存的那个、把被挤掉的放回去」来还原
+          var cur = loadViews().filter(function (v) { return v.name !== name.trim(); });
+          evicted.forEach(function (v) { cur.push(v); });
+          if (!saveViews(cur)) { toast('撤销失败：本地存储不可用'); return; }
+          renderViewsMenu();
+          toast('已撤销保存视图：' + name.trim());
+        }
+      });`,
+    before: `      toast(msg);`,
+  },
+  {
+    // 缺陷态：不管有没有超上限都拼「挤掉」文案（边界性质：未满时不该出现）
+    name: '视图未满时提示不出现「挤掉」字样',
+    after: `      var evicted = arr.length > VIEWS_MAX ? arr.slice(VIEWS_MAX) : [];`,
+    before: `      var evicted = arr.slice(VIEWS_MAX); if (!evicted.length) evicted = [{ name: '（无）' }];`,
+  },
+  {
+    // 缺陷态：viewFail 那条的缺陷形态是「写失败也照报已保存」，
+    // 即 saveViews 不返回布尔、调用方无从判断。
+    name: '视图写失败时说失败而不是已保存',
+    after: `      var okv = saveViews(arr);`,
+    before: `      var okv = true; saveViews(arr);`,
   },
 ];
 

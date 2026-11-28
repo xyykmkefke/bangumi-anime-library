@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.31">
+<meta name="version" content="1.6.32">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.31</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.32</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4404,6 +4404,9 @@
 
   // ---- 保存筛选视图 ----
   var VIEWS_KEY = 'yuc_views_v1';
+  // 上限提成常量：原先逻辑里写 slice(0, 12)、文案里一个数字都没有，
+  // 改一处就静默不一致。现在两边引用同一个值。
+  var VIEWS_MAX = 12;
   function loadViews() {
     if (!canStore) return [];
     try {
@@ -4413,9 +4416,12 @@
         : [];
     } catch (e) { return []; }
   }
+  // 返回是否真的写进了磁盘：视图是用户手搭的筛选组合，不像搜索历史那样可再生，
+  // 写失败却提示「已保存」，刷新后就没了。原先这里是 `catch (e) { /* 忽略 */ }`。
   function saveViews(arr) {
-    if (!canStore) return;
-    try { localStorage.setItem(VIEWS_KEY, JSON.stringify(arr.slice(0, 12))); } catch (e) { /* 忽略 */ }
+    if (!canStore) return false;
+    try { localStorage.setItem(VIEWS_KEY, JSON.stringify(arr.slice(0, VIEWS_MAX))); return true; }
+    catch (e) { return false; }
   }
   function currentView(name) {
     return {
@@ -5295,7 +5301,12 @@
       // 界面上却已经重绘过一遍，用户以为删掉了、下次打开还在
       if (!gone) { renderViewsMenu(); return; }
       views.splice(idx, 1);
-      saveViews(views);
+      if (!saveViews(views)) {
+        // 没写进磁盘就不要说「已删除」，否则刷新后视图又回来了，用户以为删除失灵
+        toast('删除失败：本地存储不可用（配额满或隐私模式）');
+        renderViewsMenu();
+        return;
+      }
       renderViewsMenu();
       // 保存的视图是用户手搭出来的筛选组合，删掉就得重搭一遍——此前既没有撤销，
       // 连提示都没有，点错一下悄无声息地没了
@@ -5306,7 +5317,7 @@
           // 按原下标插回；若期间又删了别的视图导致下标失效，就放回末尾
           if (idx >= 0 && idx <= cur.length) cur.splice(idx, 0, gone);
           else cur.push(gone);
-          saveViews(cur);
+          if (!saveViews(cur)) { toast('撤销失败：本地存储不可用'); return; }
           renderViewsMenu();
           toast('已恢复视图：' + gone.name);
         }
@@ -5329,9 +5340,36 @@
       if (!name || !name.trim()) return;
       var arr = loadViews();
       arr.unshift(currentView(name.trim()));
-      saveViews(arr);
+      // 超出上限时挤掉的是最早的（unshift 插到最前 + slice 从头部截断 = 淘汰尾部）。
+      // 原先这里只说「已保存视图」，被挤掉的那个是用户自己命名的、不可再生
+      // —— 导出的备份里也不含视图，丢了就真没有了。必须说清楚挤掉了几条、叫什么。
+      var evicted = arr.length > VIEWS_MAX ? arr.slice(VIEWS_MAX) : [];
+      var okv = saveViews(arr);
       renderViewsMenu();
-      toast('已保存视图：' + name.trim());
+      if (!okv) {
+        // 写失败时不能说「已保存」，否则刷新后视图凭空消失
+        toast('视图保存失败：本地存储不可用（配额满或隐私模式）');
+        return;
+      }
+      var msg = '已保存视图：' + name.trim();
+      if (evicted.length) {
+        var names = evicted.map(function (v) { return v.name; }).filter(Boolean);
+        msg = '已保存视图：' + name.trim() + '（超出 ' + VIEWS_MAX + ' 个上限，' +
+          (names.length ? '已挤掉：' + names.join('、') : '已挤掉最早 ' + evicted.length + ' 个') + '）';
+      }
+      // 给撤销：保存时可能顺带挤掉旧视图，用户看到提示想反悔就得有路可走。
+      // 撤销 = 删掉刚存的那个 + 把被挤掉的放回列表。
+      toast(msg, {
+        label: '撤销',
+        fn: function () {
+          // 直接按「删掉刚存的那个、把被挤掉的放回去」来还原
+          var cur = loadViews().filter(function (v) { return v.name !== name.trim(); });
+          evicted.forEach(function (v) { cur.push(v); });
+          if (!saveViews(cur)) { toast('撤销失败：本地存储不可用'); return; }
+          renderViewsMenu();
+          toast('已撤销保存视图：' + name.trim());
+        }
+      });
     }
   });
 

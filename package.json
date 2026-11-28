@@ -1,6 +1,6 @@
 {
   "name": "bangumi-anime-library",
-  "version": "1.6.31",
+  "version": "1.6.32",
   "private": true,
   "description": "本地优先的番剧浏览与追番清单，内置 Bangumi 1990–2026 季度数据",
   "license": "MIT",

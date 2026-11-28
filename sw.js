@@ -1,6 +1,6 @@
 // 应用壳离线缓存：页面网络优先并带超时回退，其余同源资源缓存优先、后台更新
 // 壳缓存随版本升级整体替换；封面单独放一个长期缓存，发版不再清空已下载的图片
-var CACHE = 'yuc-anime-shell-v40';
+var CACHE = 'yuc-anime-shell-v41';
 var IMG_CACHE = 'yuc-anime-images-v1';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/anime-lite.js', './vendor/opencc-t2cn.js'];
 var IMG_LIMIT = 500;

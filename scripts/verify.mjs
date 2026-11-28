@@ -1481,7 +1481,10 @@ async function main() {
       const menu = document.getElementById('cardMenu');
       menu.hidden = true;
       btn.click();
-      await new Promise((r) => setTimeout(r, 150));
+      // 固定 150ms 在慢机器/首屏渲染未完成时会偶发判失败（实测出现过一次
+      // 「opened=false」而连跑又是绿的）。改为轮询到菜单真的展开为止，最多等 1.5s。
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 15 && menu.hidden; i += 1) await sleep(100);
       const opened = !menu.hidden;
       const title = document.getElementById('cardMenuTitle').textContent;
       const opts = document.querySelectorAll('#cardMenuOpts [data-status]').length;
@@ -4879,6 +4882,118 @@ async function main() {
     check('导入无实际改动时不提供撤销按钮',
       noopImport && noopImport.hasUndo === false && noopImport.ep === 9,
       JSON.stringify(noopImport));
+
+    // ---- 视图容量与写失败可见（2026-11-28 第五轮） ----
+    // 两条判据来自已往踩过的坑：① 「超出上限时挤掉旧数据，必须说明挤掉了几条」
+    // —— 只说「保存成功」，用户不会发现少了哪一个，而那是他自己命名、不可再生的；
+    // ② 「写失败时不要按存储内容重绘/不要报成功」—— 否则刷新后内容凭空消失。
+
+    // ⑮ 视图满 12 个后再保存：提示必须点名被挤掉的那个，且撤销能拿回来。
+    const viewsFull = await cdp.evaluate(`(() => {
+      localStorage.removeItem('yuc_my_anime_v1');
+      localStorage.removeItem('yuc_prefs_v1');
+      const arr = [];
+      for (let i = 1; i <= 12; i += 1) arr.push({ name: '视图' + i, tab: 'all', year: '2026', sort: 'score' });
+      localStorage.setItem('yuc_views_v1', JSON.stringify(arr));
+      return arr.length;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const viewEvict = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const btn = document.getElementById('viewsBtn');
+      if (!btn) return { err: '无 #viewsBtn' };
+      btn.click();
+      await sleep(450);
+      window.prompt = () => '新视图';
+      const saveBtn = document.querySelector('[data-view-save]');
+      if (!saveBtn) return { err: '无保存入口' };
+      saveBtn.click();
+      await sleep(550);
+      const after = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      const txt = document.getElementById('toast').textContent || '';
+      const hasUndo = !!document.getElementById('toastAct');
+      const u = document.getElementById('toastAct');
+      if (u) u.click();
+      await sleep(550);
+      const back = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      return {
+        afterCount: after.length,
+        evictedGone: after.indexOf('视图12') < 0,
+        newSaved: after.indexOf('新视图') >= 0,
+        toast: txt.slice(0, 80),
+        mentionsEvicted: /挤掉/.test(txt) && /视图12/.test(txt),
+        hasUndo,
+        undoRemovedNew: back.indexOf('新视图') < 0,
+        undoRestoredEvicted: back.indexOf('视图12') >= 0
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('视图超出上限时提示点名被挤掉的条目',
+      viewEvict && viewEvict.afterCount === 12 && viewEvict.evictedGone === true &&
+      viewEvict.newSaved === true && viewEvict.mentionsEvicted === true,
+      JSON.stringify(viewEvict));
+    check('撤销保存视图能把被挤掉的旧视图拿回来',
+      viewEvict && viewEvict.hasUndo === true &&
+      viewEvict.undoRemovedNew === true && viewEvict.undoRestoredEvicted === true,
+      JSON.stringify(viewEvict));
+
+    // ⑯ 视图没满时保存：提示不该出现「挤掉」字样（防误报，边界性质独立断言）
+    const viewNoEvict = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      localStorage.setItem('yuc_views_v1', JSON.stringify([
+        { name: '已有', tab: 'all', year: '2026', sort: 'score' }
+      ]));
+      document.getElementById('viewsBtn').click();
+      await sleep(450);
+      window.prompt = () => '第二个';
+      document.querySelector('[data-view-save]').click();
+      await sleep(550);
+      const txt = document.getElementById('toast').textContent || '';
+      const u = document.getElementById('toastAct');
+      if (u) u.click();
+      await sleep(500);
+      const back = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      return { mentionsEvicted: /挤掉/.test(txt), back };
+    })()`).catch((e) => ({ err: e.message }));
+    check('视图未满时提示不出现「挤掉」字样，撤销删掉刚存的',
+      viewNoEvict && viewNoEvict.mentionsEvicted === false &&
+      viewNoEvict.back && viewNoEvict.back.length === 1 && viewNoEvict.back[0] === '已有',
+      JSON.stringify(viewNoEvict));
+
+    // ⑰ 视图写失败时必须说「失败」，不能说「已保存」。
+    //    改 Storage.prototype 而不是实例：挂实例上会给 Storage 加自有属性，
+    //    Object.keys(localStorage) 会多出 'setItem'，把别处的键名断言搞挂。
+    const viewFail = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      localStorage.setItem('yuc_views_v1', JSON.stringify([
+        { name: '已有', tab: 'all', year: '2026', sort: 'score' }
+      ]));
+      document.getElementById('viewsBtn').click();
+      await sleep(450);
+      window.prompt = () => '存不下';
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (k === 'yuc_views_v1') {
+          const e = new Error('quota');
+          e.name = 'QuotaExceededError';
+          throw e;
+        }
+        return orig.call(this, k, v);
+      };
+      document.querySelector('[data-view-save]').click();
+      await sleep(550);
+      const txt = document.getElementById('toast').textContent || '';
+      Storage.prototype.setItem = orig;
+      const list = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      return { saidSaved: /已保存视图/.test(txt), saidFailed: /失败/.test(txt), toast: txt.slice(0, 60), list };
+    })()`).catch((e) => ({ err: e.message }));
+    check('视图写失败时说失败而不是已保存',
+      viewFail && viewFail.saidSaved === false && viewFail.saidFailed === true &&
+      viewFail.list && viewFail.list.length === 1,
+      JSON.stringify(viewFail));
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");
