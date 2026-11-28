@@ -3677,7 +3677,9 @@ async function main() {
     await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: tombMock.result.identifier });
 
     // 断开同步后，在途请求不得把 Token 写回磁盘
-    await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+    // 记下 identifier：这个注入会在每次 reload 时重新执行，后面「令牌保存失败」那条
+    // 断言必须能把它摘掉，否则它会一直往 yuc_gist_v1 里写探针值。
+    const gistProbe = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
       source: `(() => {
         const orig = window.fetch;
         window.fetch = (url, opts) => {
@@ -3697,6 +3699,7 @@ async function main() {
         localStorage.setItem('yuc_gist_v1', JSON.stringify({ token: 'ghp_secret_probe', gistId: 'abc' }));
       })();`,
     });
+    let gistProbeId = gistProbe.result.identifier;
     await cdp.send('Page.reload');
     // 必须等同步真正开始再断开：启动后 1.2s 才第一次 syncNow，
     // 若在此之前断开，loadSyncCfg 读到的是空配置、根本不会发起请求，
@@ -4994,6 +4997,196 @@ async function main() {
       viewFail && viewFail.saidSaved === false && viewFail.saidFailed === true &&
       viewFail.list && viewFail.list.length === 1,
       JSON.stringify(viewFail));
+
+    // ===== 第六轮：用户做了但系统没记住 =====
+    // 三类「说了但做不到」：提示承诺了原件可导出却没有入口、删除标记没保存却报成功、
+    // 令牌没保存却以为已连接。共同点都是**用户看不出异常**。
+
+    // ① 清单损坏时，导出的必须是原件而不是内存里的空清单
+    const CORRUPT_RAW = '{"1234":{"s":"done","ep":5},{"5678":{"s":"want"';
+    await cdp.evaluate(`localStorage.setItem('yuc_my_anime_v1', ${JSON.stringify(CORRUPT_RAW)}); localStorage.removeItem('yuc_my_anime_v1_broken');`);
+    await cdp.send('Page.reload');
+    await sleep(2200);
+    const corruptExport = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_my_anime_v1';
+      let captured = null, fname = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader();
+        fr.onload = () => { captured = String(fr.result); };
+        fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { fname = this.download; };
+      const exp = document.getElementById('exportBtn');
+      if (exp) { exp.hidden = false; exp.click(); }
+      await new Promise((r) => setTimeout(r, 700));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      const txt = document.getElementById('toast').textContent || '';
+      return {
+        capturedLen: captured ? captured.length : 0,
+        isOriginal: captured === ${JSON.stringify(CORRUPT_RAW)},
+        fname: fname || '',
+        toast: txt.slice(0, 80),
+        brokenKept: !!localStorage.getItem(KEY + '_broken'),
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('清单损坏时导出的是原件而不是空清单',
+      corruptExport && corruptExport.isOriginal === true && corruptExport.brokenKept === true,
+      JSON.stringify(corruptExport));
+    check('导出原件时文件名与提示都标明是原件',
+      corruptExport && /原件/.test(corruptExport.fname) && /已导出损坏原件/.test(corruptExport.toast),
+      JSON.stringify(corruptExport));
+
+    // 恢复干净状态后再验一条：正常导出仍是 JSON（别为了修损坏路径把正常路径改坏）
+    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_my_anime_v1_broken');");
+    await cdp.send('Page.reload');
+    await sleep(2200);
+    const normalExport = await cdp.evaluate(`(async () => {
+      let captured = null, fname = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader();
+        fr.onload = () => { captured = String(fr.result); };
+        fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { fname = this.download; };
+      const exp = document.getElementById('exportBtn');
+      if (exp) { exp.hidden = false; exp.click(); }
+      await new Promise((r) => setTimeout(r, 700));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      let p = null;
+      try { p = JSON.parse(captured); } catch (e) { p = null; }
+      return { fname: fname || '', isJson: !!p && Array.isArray(p.items), version: p && p.version };
+    })()`).catch((e) => ({ err: e.message }));
+    check('清单正常时导出仍是 JSON 备份',
+      normalExport && normalExport.isJson === true && normalExport.version === 2 && /\.json$/.test(normalExport.fname),
+      JSON.stringify(normalExport));
+
+    // ② 墓碑写失败时：toast 要说「删除标记未保存」，且顶部有不会被覆盖的常驻提示
+    const seedIds = await cdp.evaluate(`(async () => {
+      const all = document.querySelector('.tab[data-tab="all"]');
+      if (all) all.click();
+      let cards = [];
+      for (let i = 0; i < 30; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'));
+        if (cards.length >= 2) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const ids = cards.slice(0, 2).map((c) => c.dataset.id);
+      const m = {};
+      ids.forEach((id) => { m[id] = { s: 'want', t: Date.now(), ep: 1, u: Date.now() }; });
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(m));
+      return ids;
+    })()`).catch(() => []);
+    await cdp.send('Page.reload');
+    await sleep(2400);
+    const tombFail = await cdp.evaluate(`(async () => {
+      const DEL = 'yuc_deleted_v1';
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (k === DEL) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return orig.call(this, k, v);
+      };
+      const mine = document.querySelector('.tab[data-tab="mine"]');
+      if (mine) mine.click();
+      let cards = [];
+      for (let i = 0; i < 30; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'))
+          .filter((c) => { const t = c.querySelector('[data-act="toggle"]'); return t && t.textContent.indexOf('移出') >= 0; });
+        if (cards.length) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!cards.length) { Storage.prototype.setItem = orig; return { __noCard: true }; }
+      cards[0].querySelector('[data-act="toggle"]').click();
+      await new Promise((r) => setTimeout(r, 700));
+      const txt = document.getElementById('toast').textContent || '';
+      const warn = document.getElementById('storageWarn');
+      const out = {
+        toast: txt.slice(0, 120),
+        warnShown: !!(warn && !warn.hidden),
+        warnText: warn ? warn.textContent.trim().slice(0, 80) : '',
+        delStored: localStorage.getItem(DEL),
+      };
+      Storage.prototype.setItem = orig;
+      return out;
+    })()`).catch((e) => ({ err: e.message }));
+    check('删除标记写失败时提示说明「下次同步可能拉回来」',
+      tombFail && tombFail.warnShown === true && /删除记录暂时无法保存/.test(tombFail.warnText || ''),
+      JSON.stringify(tombFail));
+    check('删除标记写失败时 toast 同时标注未保存的只是删除标记',
+      tombFail && /删除标记未保存/.test(tombFail.toast || ''),
+      JSON.stringify(tombFail));
+
+    // ③ 写入恢复后，那条删除专用横幅要撤掉（只撤自己那条，别人的警告不能顺手清）
+    const tombRecover = await cdp.evaluate(`(async () => {
+      const DEL = 'yuc_deleted_v1';
+      const warn = document.getElementById('storageWarn');
+      const beforeHidden = !!(warn && warn.hidden);
+      const mine = document.querySelector('.tab[data-tab="mine"]');
+      if (mine) mine.click();
+      let cards = [];
+      for (let i = 0; i < 30; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'))
+          .filter((c) => { const t = c.querySelector('[data-act="toggle"]'); return t && t.textContent.indexOf('移出') >= 0; });
+        if (cards.length) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      let removed = false;
+      if (cards.length) { cards[0].querySelector('[data-act="toggle"]').click(); removed = true; }
+      await new Promise((r) => setTimeout(r, 800));
+      return { beforeHidden, removed, afterHidden: !!(warn && warn.hidden), delNow: (localStorage.getItem(DEL) || '').slice(0, 40) };
+    })()`).catch((e) => ({ err: e.message }));
+    check('删除标记写入恢复后撤掉该横幅',
+      tombRecover && tombRecover.beforeHidden === false && tombRecover.removed === true && tombRecover.afterHidden === true,
+      JSON.stringify(tombRecover));
+
+    // ④ 云同步令牌写失败时：状态栏与 toast 都要说清「没保存到本机」
+    // 前置：这个键上可能残留别处的探针值（{"token":"ghp_secret_probe",...}）。
+    // 那个探针是用 addScriptToEvaluateOnNewDocument 注入的，**每次 reload 都会再写一遍**，
+    // 所以「清一次再刷新」清不掉——必须先把注入的脚本撤掉，否则后面的
+    // 「stored === null」判据会恒假，看起来像被测对象有问题。
+    if (gistProbeId) {
+      try { await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: gistProbeId }); } catch (e) { /* 已移除 */ }
+      gistProbeId = null;
+    }
+    await cdp.evaluate("localStorage.removeItem('yuc_gist_v1');");
+    await cdp.send('Page.reload');
+    await sleep(2200);
+    const tokenFail = await cdp.evaluate(`(async () => {
+      const GIST = 'yuc_gist_v1';
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (k === GIST) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return orig.call(this, k, v);
+      };
+      const syncBtn = document.getElementById('syncBtn');
+      if (syncBtn) syncBtn.click();
+      await new Promise((r) => setTimeout(r, 400));
+      document.getElementById('gistToken').value = 'ghp_TEST_TOKEN_1234567890';
+      document.getElementById('gistId').value = '';
+      const btn = document.getElementById('syncNowBtn');
+      if (btn) btn.click();
+      await new Promise((r) => setTimeout(r, 900));
+      const status = document.getElementById('syncStatus');
+      const out = {
+        statusText: status ? status.textContent.trim().slice(0, 80) : '',
+        toast: (document.getElementById('toast').textContent || '').slice(0, 80),
+        stored: localStorage.getItem(GIST),
+      };
+      Storage.prototype.setItem = orig;
+      return out;
+    })()`).catch((e) => ({ err: e.message }));
+    check('令牌保存失败时不报「已连接」而明确说失败',
+      tokenFail && tokenFail.stored === null &&
+      /令牌保存失败/.test(tokenFail.statusText || '') &&
+      /刷新后需要重新填写|刷新后需重新填写/.test(tokenFail.toast || ''),
+      JSON.stringify(tokenFail));
 
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");

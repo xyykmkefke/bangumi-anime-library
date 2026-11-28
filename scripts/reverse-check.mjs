@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -299,6 +300,57 @@ const CASES = [
     after: `      var okv = saveViews(arr);`,
     before: `      var okv = true; saveViews(arr);`,
   },
+  {
+    // 缺陷态：清单损坏时照常导出内存里的空清单（items: []），
+    // 提示却写着「原件已备份」——用户拿到的是一份「我什么都没收藏」的备份。
+    name: '清单损坏时导出的是原件而不是空清单',
+    after: `    if (mineCorrupt) {
+      var raw = brokenRaw();
+      if (!raw) {
+        toast('样品已损坏且未留存原件，无法导出。若曾导出过备份，请用「导入备份」恢复');
+        return;
+      }
+      download('我的番剧-原件-' + stamp() + '.txt', raw, 'text/plain');
+      toast('已导出损坏原件（' + raw.length + ' 字节）。原件是未修复的原始内容，请保留备查');
+      return;
+    }`,
+    before: `    if (false) { void brokenRaw; }`,
+  },
+  {
+    // 缺陷态：墓碑写失败被空 catch 吞掉，toast 照旧说「已移出」。
+    // 单独成条：与「可见性」是两件事——一个实现可能加了口径正确的文案，
+    // 却没有真的把失败记下来（反过来也可能）。
+    name: '删除标记写失败时提示说明「下次同步可能拉回来」',
+    after: `      delFailedAt = Date.now();
+      // toast 三秒就没了，而这件事的后果要等到下次同步才显形，
+      // 必须留一条不会被覆盖的常驻通道。文案只讲「删除标记」，因为清单本体是写成功的。
+      showStorageWarn(DEL_WARN_TEXT);
+      return false;`,
+    before: `      return false;`,
+  },
+  {
+    // 缺陷态：写入恢复后不撤横幅，那条警告会一直挂在屏幕上，
+    // 用户以为问题还在（而它只是几分钟前的历史状态）。
+    name: '删除标记写入恢复后撤掉该横幅',
+    after: `      if (delFailedAt) {
+        delFailedAt = 0;
+        var w = $('storageWarn');
+        if (w && !w.hidden && w.textContent === DEL_WARN_TEXT) w.hidden = true;
+      }`,
+    before: `      /* 缺陷态：写成功也把警告留着 */`,
+  },
+  {
+    // 缺陷态：令牌写失败当作成功，继续走同步，刷新后配置消失。
+    name: '令牌保存失败时不报「已连接」而明确说失败',
+    after: `    if (!saveSyncCfg(cfg)) {
+      setSyncStatus('令牌保存失败：本地存储不可用（配额满或隐私模式）', 'err');
+      toast('令牌未能保存到本机：刷新后需要重新填写。请检查浏览器存储设置');
+      return;
+    }
+    syncNow(false);`,
+    before: `    saveSyncCfg(cfg);
+    syncNow(false);`,
+  },
 ];
 
 function run(cmd, args, opts = {}) {
@@ -313,7 +365,43 @@ function run(cmd, args, opts = {}) {
 
 async function main() {
   const original = await fs.readFile(HTML, 'utf8');
+
+  // 开工前自检：上次运行是不是被中断、把 index.html 留在了「缺陷态」？
+  //
+  // 这不是假想的场景——实测发生过：一次 --only=A,B,C 跑到一半被 SIGTERM 掐断，
+  // 文件停在 patch 后的状态；下一次运行时把它当成了「原文」，改完又「还原」回去，
+  // 于是修复代码被静默吞掉，而验收因为走的是另一条分支仍然是绿的。
+  // 这种损坏极难发现（diff 里只剩注释、代码不见了），所以必须在入口拦住。
+  const stuck = CASES.filter((c) => original.indexOf(c.after) < 0 && original.indexOf(c.before) >= 0);
+  if (stuck.length) {
+    console.error('!! index.html 似乎停在上次反向验证的「缺陷态」，拒绝运行。');
+    console.error('   命中：' + stuck.map((c) => c.name).join('、'));
+    console.error('   请先用 git diff 检查并恢复这些片段，再重跑本脚本。');
+    process.exitCode = 1;
+    return;
+  }
+
   const results = [];
+  // 进程被外部掐断（SIGTERM/SIGINT）时，上面的 try/finally 不会执行，
+  // index.html 会留在缺陷态。实测踩过这个坑：一次 --only=A,B,C 跑到一半被
+  // SIGTERM 终止，文件停在 patch 后的状态，下一次运行把它当成「原文」，
+  // 于是修复代码被静默吞掉。这里注册一次性还原钩子兜住这种中断。
+  const restoreOnSignal = (sig) => {
+    process.on(sig, () => {
+      // 信号处理器里不能 await，用同步 API 尽力还原
+      try {
+        const now = fsSync.readFileSync(HTML, 'utf8');
+        if (now !== original) {
+          fsSync.writeFileSync(HTML, original, 'utf8');
+          console.error('\n!! 收到 ' + sig + '，已把 index.html 还原到本次运行前的状态');
+        }
+      } catch (e) { /* 尽力而为 */ }
+      process.exit(1);
+    });
+  };
+  restoreOnSignal('SIGTERM');
+  restoreOnSignal('SIGINT');
+
   // --only=关键词 只跑名称包含该关键词的 case：单条排查时不必等整套 16 分钟
   // 支持逗号分隔多个关键词（--only=A,B），方便按批次反向验证而不用开并行
   // ——每个 case 都会改写 index.html，并行必然互相踩踏。

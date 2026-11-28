@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.32">
+<meta name="version" content="1.6.33">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.32</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.33</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2858,11 +2858,41 @@
     }
   }
 
+  // 墓碑写入结果：失败时必须让用户知道，否则「删了又回来」无法归因。
+  // 单独记账而不复用 saveFailedAt：删除标记与清单本体是两个键，共用一条提示时
+  // 「A 写失败、B 写成功」会把提示撤掉，而 A 的数据其实已经丢了。
+  var delFailedAt = 0;
+  var DEL_WARN_TEXT = '删除记录暂时无法保存：已删掉的条目可能在下次云同步时被拉回来。请稍后重试，或导出备份确认结果。';
+
   function persistDeleted() {
-    if (!canStore) return;
+    if (!canStore) {
+      // canStore 为 false 时，每次写入都必然失败，saveMine 那条「未保存」提示
+      // 已经在 toast 里优先接管（saveFailedAt 判断在 delFailedAt 之前），
+      // 页面顶部也有常驻横幅讲「本地存储被禁用」。这里不设 delFailedAt：
+      // 设了也只会在 saveMine 没被调用、或 8 秒窗口外时冒出一条重复信息。
+      return false;
+    }
     try {
       localStorage.setItem(DEL_KEY, JSON.stringify(myDeleted));
-    } catch (e) { /* 忽略存储失败 */ }
+      // 之前那条「删除记录无法保存」的横幅要撤掉：这次写成功了，
+      // 再挂着会让用户以为问题还在（而它只是三分钟前的历史状态）。
+      // 但只撤自己那条——别的警告（存储被禁用、清单损坏）不该被顺手清掉。
+      if (delFailedAt) {
+        delFailedAt = 0;
+        var w = $('storageWarn');
+        if (w && !w.hidden && w.textContent === DEL_WARN_TEXT) w.hidden = true;
+      }
+      return true;
+    } catch (e) {
+      // 空 catch 在这里代价极高：墓碑是「我删过这条」的唯一凭证，丢了它
+      // 下一次云同步会把这条当成「另一端新增」拉回来。中间隔了一次刷新和一次同步，
+      // 用户根本不会往「那天删除没记上」上想——所以必须当场留痕。
+      delFailedAt = Date.now();
+      // toast 三秒就没了，而这件事的后果要等到下次同步才显形，
+      // 必须留一条不会被覆盖的常驻通道。文案只讲「删除标记」，因为清单本体是写成功的。
+      showStorageWarn(DEL_WARN_TEXT);
+      return false;
+    }
   }
 
   function markDeleted(id) {
@@ -2957,6 +2987,12 @@
     // 刷新后却发现没了。与其改 16 个调用点（还会漏），不如在这里统一兜住。
     if (saveFailedAt && Date.now() - saveFailedAt < 8000) {
       msg = '未保存：' + msg + '（本地存储不可用，详见顶部提示）';
+      action = null;
+    } else if (delFailedAt && Date.now() - delFailedAt < 8000) {
+      // 墓碑写失败是另一种失败：清单本体写进去了（记录确实从磁盘上没了），
+      // 只是「我删过它」这个凭证没留下。后果延迟出现——下次云同步把它拉回来。
+      // 所以文案不能说「未保存」（那会让人以为没删掉），而要说清「删了但没记住」。
+      msg = msg + '（删除标记未保存：下次云同步可能把这条拉回来，请稍后重试或导出备份确认）';
       action = null;
     }
     // 撤销窗口期内的**后台**提示排队，等窗口结束再显示。
@@ -6414,6 +6450,20 @@
     return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
   }
 
+  // 读取「清单解析失败时留存的原始字符串」。
+  // 为什么需要这个函数：loadMine 解析失败时会把原文另存到 STORAGE_KEY + '_broken'，
+  // 提示里写的是「原件已备份到浏览器存储」。但在此之前**这个副本只写不读**——
+  // 页面上没有任何入口能把它取出来，用户按提示点「导出 JSON」，导出的是内存里的
+  // 空清单（items: []），而真正的原件仍然躺在 localStorage 里，用户拿不到。
+  // 提示承诺了一个能力，实现却没提供，属于「假修复」的同类：说了但做不到。
+  function brokenRaw() {
+    if (!canStore) return '';
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY + '_broken');
+      return typeof raw === 'string' ? raw : '';
+    } catch (e) { return ''; }
+  }
+
   function download(filename, text, type) {
     var blob = new Blob([text], { type: type });
     var url = URL.createObjectURL(blob);
@@ -6438,6 +6488,20 @@
   }
 
   $('exportBtn').addEventListener('click', function () {
+    // 清单损坏时，内存里的 myMap 是空的——此时导出 items: [] 等于给用户一份
+    // 「我的番剧一部都没有」的备份，而他按提示正是来导出原件的。
+    // 存好的原始字符串原样交付（不尝试修复：损坏的原因未知，改写只会让可抢救的
+    // 内容变得更不可读）。文件名加「原件」前缀，和正常备份区分开。
+    if (mineCorrupt) {
+      var raw = brokenRaw();
+      if (!raw) {
+        toast('样品已损坏且未留存原件，无法导出。若曾导出过备份，请用「导入备份」恢复');
+        return;
+      }
+      download('我的番剧-原件-' + stamp() + '.txt', raw, 'text/plain');
+      toast('已导出损坏原件（' + raw.length + ' 字节）。原件是未修复的原始内容，请保留备查');
+      return;
+    }
     var ids = Object.keys(myMap).map(function (id) {
       var entry = myMap[id] || {};
       return {
@@ -6697,12 +6761,17 @@
   var cfgEpoch = 0;
 
   function saveSyncCfg(cfg, epoch) {
-    if (epoch != null && epoch !== cfgEpoch) return;
+    if (epoch != null && epoch !== cfgEpoch) return false;
     syncCfg = cfg || {};
-    if (!canStore) return;
+    if (!canStore) return false;
     try {
       localStorage.setItem(GIST_KEY, JSON.stringify(syncCfg));
-    } catch (e) { /* 忽略存储失败 */ }
+      return true;
+    } catch (e) {
+      // 配置里有访问令牌。写不进磁盘时，用户以为「已连接」，刷新后令牌没了、
+      // 同步静默失效——而界面上什么都看不出来。返回布尔让调用方判断。
+      return false;
+    }
   }
 
   function setSyncStatus(text, tone) {
@@ -7058,10 +7127,17 @@
       if (epoch !== cfgEpoch) return false;
       clearSyncRetry();
       cfg.lastSync = Date.now();
-      saveSyncCfg(cfg, epoch);
+      // 同步本身成功了，但配置（含令牌）可能没落盘。此时不能说「已同步」了事：
+      // 刷新后令牌消失，用户会以为同步功能坏了。明确降级为「本次同步成功、配置未保存」。
+      var cfgSaved = saveSyncCfg(cfg, epoch);
       markBackup();
-      setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
-      if (!silent) toast('云同步完成', null, { quiet: true });
+      if (cfgSaved) {
+        setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
+        if (!silent) toast('云同步完成', null, { quiet: true });
+      } else {
+        setSyncStatus('本次同步成功，但令牌未能保存到本机（刷新后需重新填写）', 'err');
+        if (!silent) toast('云同步完成，但令牌没能保存：刷新后需要重新填写', null, { quiet: true });
+      }
       return true;
     }).catch(function (err) {
       var msg = err && err.message ? err.message : '同步失败';
@@ -7099,7 +7175,13 @@
     var cfg = loadSyncCfg();
     cfg.token = token;
     cfg.gistId = gistId;
-    saveSyncCfg(cfg);
+    // 先落盘再同步：配置写不进去时同步即便成功，刷新后令牌也会丢，
+    // 下次打开变成「未配置」而用户以为是同步坏了。此时直接停在面板里说清楚。
+    if (!saveSyncCfg(cfg)) {
+      setSyncStatus('令牌保存失败：本地存储不可用（配额满或隐私模式）', 'err');
+      toast('令牌未能保存到本机：刷新后需要重新填写。请检查浏览器存储设置');
+      return;
+    }
     syncNow(false);
   });
   $('syncDisconnectBtn').addEventListener('click', function () {
