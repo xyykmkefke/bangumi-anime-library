@@ -351,6 +351,46 @@ const CASES = [
     before: `    saveSyncCfg(cfg);
     syncNow(false);`,
   },
+  {
+    // 缺陷态：「收藏 N 部」用筛选后的 list.length。
+    // 点一下「在看」，同屏 tab 徽标还写着 3、下面却变成「收藏 1 部」，
+    // 用户会以为自己误删了 2 部。
+    name: '「收藏 N 部」的 N 是收藏总数，不随状态筛选变',
+    after: `      $('statCount').textContent = mineTotal;`,
+    before: `      $('statCount').textContent = list.length;`,
+  },
+  {
+    // 缺陷态：清单里同时装着想看/在看/弃番，却统一叫「已看番剧」。
+    // 实测 3 部收藏里只有 1 部看完，紧挨着的状态行写着「想看 1 / 在看 1 / 看完 1」。
+    name: '收藏条数不写成「已看番剧」而只陈述条数',
+    after: `      labelText = list.length === mineTotal ? '部收藏' : '部 · 当前筛选';`,
+    before: `      labelText = '部已看番剧';`,
+  },
+  {
+    // 缺陷态：幽灵记录（myMap 有、库中无）落进「换个状态看看」。
+    // 那几句话在承诺一件做不到的事——用户怎么换筛选都看不到，因为数据不在库里。
+    // 复现方式：把 `if (!mineTotal)` 变成恒假，mineTotal 为 0 时会一路落到
+    // 末尾那句「当前筛选下还没有番剧，换个状态看看」——正是修复前的行为。
+    name: '幽灵记录下的空态说明「不在当前数据库」',
+    after: `        if (!mineTotal) {
+          if (Object.keys(myMap).length) {`,
+    before: `        if (false) {
+          if (Object.keys(myMap).length) {`,
+  },
+  {
+    // 缺陷态：按钮文案写着「导出备份核对」，却没接动作——点了什么都不发生。
+    // 这正是本轮要消掉的「说了但做不到」，不能修完三处又新造一处。
+    name: '幽灵记录空态里的「导出备份核对」按钮真的触发导出',
+    after: `    if (e.target.closest('#exportGhostBtn')) {
+      // 按钮文案承诺的是「导出备份核对」，就必须真的触发导出。
+      // 不能改个文案却没接动作——那正是本轮要消掉的「说了但做不到」。
+      // 导出入口本身的 mineCorrupt 分支与正常分支都在 exportBtn 上，直接复用。
+      var expBtn = $('exportBtn');
+      if (expBtn) expBtn.click();
+      return;
+    }`,
+    before: `    if (e.target.closest('#exportGhostBtnX')) { return; }`,
+  },
 ];
 
 function run(cmd, args, opts = {}) {
@@ -432,12 +472,18 @@ async function main() {
     const lines = out.split(/\r?\n/);
     const line = lines.find((l) => l.indexOf(c.name) >= 0 && /^(PASS|FAIL)/.test(l.trim()));
     const totalLine = lines.find((l) => /^结果：/.test(l.trim()));
+    // 带上「失败项：」那一行：缺陷态下常有**连带失败**（同一根因的后果），
+    // 只看目标行 FAIL 无法区分「精准命中」与「顺手把别处也打挂了」。
+    // 若连带的是同一根因的后果，属正常；若打挂的是毫不相关的断言，
+    // 说明这些断言之间存在隐式依赖，得先修掉再谈反向验证有效。
+    const failLine = lines.find((l) => /^失败项：/.test(l.trim()));
     const failed = line ? /^FAIL/.test(line.trim()) : false;
     results.push({
       name: c.name,
       status: failed ? 'OK-已FAIL' : 'BAD-仍PASS',
       line: (line || '（未在输出中找到该断言行）').trim(),
       total: (totalLine || '').trim(),
+      failedNames: (failLine || '').trim(),
       tail: line ? '' : out.split(/\r?\n/).filter((l) => l.trim()).slice(-25).join('\n'),
     });
   }
@@ -449,6 +495,7 @@ async function main() {
     console.log(`${r.status.padEnd(20)} ${r.name}`);
     if (r.line) console.log(`    ${r.line}`);
     if (r.total) console.log(`    ${r.total}`);
+    if (r.failedNames) console.log(`    ${r.failedNames}`);
     if (r.tail) console.log('    ---- 输出尾部 ----\n' + r.tail.split('\n').map((l) => '    ' + l).join('\n'));
   });
   console.log('文件已还原:', restored === original ? 'YES' : 'NO');

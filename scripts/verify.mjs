@@ -5188,6 +5188,156 @@ async function main() {
       /刷新后需要重新填写|刷新后需重新填写/.test(tokenFail.toast || ''),
       JSON.stringify(tokenFail));
 
+    // ===== 第七轮：用户以为在做 A，实际做的是 B（语义漂移）=====
+    // 这一轮找的不是「功能没做」，而是「文案与它旁边那个数字说的不是一回事」。
+    // 共同点：代码每条路径都跑得通，但用户看到的两个数字互相矛盾，
+    // 于是会以为自己的操作出了错（误删、丢数据），而实际上什么都没发生。
+
+    // ① 「收藏 N 部」的 N 是收藏总数，不随状态筛选变
+    const statSeed = await cdp.evaluate(`(async () => {
+      const all = document.querySelector('.tab[data-tab="all"]');
+      if (all) all.click();
+      let cards = [];
+      for (let i = 0; i < 40; i += 1) {
+        cards = Array.from(document.querySelectorAll('#grid .card'));
+        if (cards.length >= 3) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (cards.length < 3) return { __seedFail: cards.length };
+      const ids = cards.slice(0, 3).map((c) => c.dataset.id);
+      const now = Date.now();
+      const m = {};
+      // 进度一律留 0：全库数据到达后会执行「已追平即自动标为看完」的校正，
+      // 给 doing 条目写个 ep:3 时，若它的总话数恰好 ≤3 就会被改成 done，
+      // 于是「在看」变成 0 条，断言会以「种子里没有在看条目」这种假象失败。
+      m[ids[0]] = { s: 'want', t: now, ep: 0, u: now };
+      m[ids[1]] = { s: 'doing', t: now, ep: 0, u: now };
+      m[ids[2]] = { s: 'done', t: now, ep: 0, u: now };
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(m));
+      localStorage.removeItem('yuc_prefs_v1');
+      localStorage.removeItem('yuc_deleted_v1');
+      return { ids };
+    })()`).catch((e) => ({ err: e.message }));
+    await cdp.send('Page.reload');
+    await sleep(2400);
+    const statProbe = await cdp.evaluate(`(async () => {
+      const read = () => ({
+        stat: document.getElementById('statCount').textContent,
+        badge: document.getElementById('mineCount').textContent,
+        count: document.getElementById('resultCount').textContent,
+        label: document.getElementById('resultLabel').textContent,
+        cards: document.querySelectorAll('#grid .card').length,
+        rowText: (document.getElementById('statusRow').textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
+      });
+      const mine = document.querySelector('.tab[data-tab="mine"]');
+      if (!mine) return { __noTab: true };
+      mine.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const before = read();
+      const pill = document.querySelector('#statusRow [data-status="doing"]');
+      if (!pill) return { __noPill: true, before };
+      pill.click();
+      await new Promise((r) => setTimeout(r, 450));
+      const after = read();
+      // 复原：切回「全部」，避免影响后续断言
+      const allPill = document.querySelector('#statusRow [data-status="all"]');
+      if (allPill) allPill.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return { before, after };
+    })()`).catch((e) => ({ err: e.message }));
+    check('「收藏 N 部」的 N 是收藏总数，不随状态筛选变',
+      statProbe && statProbe.before && statProbe.after &&
+      statProbe.before.stat === '3' && statProbe.before.badge === '3' &&
+      // 缺陷态下 stat 会跟着筛选变成 1，而同屏徽标仍是 3 —— 两个数字打架
+      statProbe.after.stat === '3' && statProbe.after.badge === '3' &&
+      statProbe.after.count === '1' && statProbe.after.cards === 1,
+      JSON.stringify(statProbe));
+
+    // ② 收藏条数不冒充「已看」：清单里同时装着想看/在看/弃番
+    // 实测 3 部收藏里只有 1 部「看完」，界面写「3 部已看番剧」，
+    // 紧挨着的状态行却写着「想看 1 / 在看 1 / 看完 1」。文案只陈述条数，分布交给状态行。
+    check('收藏条数不写成「已看番剧」而只陈述条数',
+      statProbe && statProbe.before && statProbe.after &&
+      !/已看/.test(statProbe.before.label) && !/已看/.test(statProbe.after.label) &&
+      statProbe.before.label === '部收藏' &&
+      statProbe.after.label === '部 · 当前筛选',
+      JSON.stringify(statProbe && { before: statProbe.before && statProbe.before.label, after: statProbe.after && statProbe.after.label }));
+
+    // ③ 幽灵记录（myMap 有、库中无）必须给出能解释原因的空态
+    // 这是独立状态，不能落进「当前筛选下还没有番剧，换个状态看看」——
+    // 那几句话在承诺一件做不到的事：用户怎么换筛选都看不到，因为数据本身不在库里。
+    await cdp.evaluate(`(async () => {
+      const now = Date.now();
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        '999999001': { s: 'want', t: now, ep: 0, u: now },
+        '999999002': { s: 'done', t: now, ep: 1, u: now },
+      }));
+      localStorage.removeItem('yuc_prefs_v1');
+      localStorage.removeItem('yuc_deleted_v1');
+    })()`);
+    await cdp.send('Page.reload');
+    await sleep(2400);
+    const ghostState = await cdp.evaluate(`(async () => {
+      const mine = document.querySelector('.tab[data-tab="mine"]');
+      if (mine) mine.click();
+      await new Promise((r) => setTimeout(r, 450));
+      const empty = document.getElementById('empty');
+      const txt = (empty.textContent || '').replace(/\\s+/g, ' ').trim();
+      return {
+        hidden: !!empty.hidden,
+        text: txt.slice(0, 120),
+        mentionsMissing: /不在当前数据库/.test(txt),
+        blamesFilter: /换个状态看看/.test(txt),
+        hasExportBtn: !!document.getElementById('exportGhostBtn'),
+        hasBrowseBtn: !!document.getElementById('browseAllBtn'),
+        badge: document.getElementById('mineCount').textContent,
+        stat: document.getElementById('statCount').textContent,
+        cards: document.querySelectorAll('#grid .card').length,
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('幽灵记录下的空态说明「不在当前数据库」而不是让用户换筛选',
+      ghostState && ghostState.hidden === false &&
+      ghostState.mentionsMissing === true && ghostState.blamesFilter === false &&
+      ghostState.badge === '0' && ghostState.stat === '0' && ghostState.cards === 0,
+      JSON.stringify(ghostState));
+
+    // ④ 空态里那个按钮写着「导出备份核对」，就必须真的导出
+    // 只改文案不接动作，等于新造一个「说了但做不到」——正是本轮要消掉的东西。
+    const ghostExport = await cdp.evaluate(`(async () => {
+      let captured = null, fname = null;
+      const origCreate = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const fr = new FileReader();
+        fr.onload = () => { captured = String(fr.result); };
+        fr.readAsText(blob);
+        return origCreate.call(URL, blob);
+      };
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { fname = this.download; };
+      const btn = document.getElementById('exportGhostBtn');
+      if (!btn) {
+        URL.createObjectURL = origCreate;
+        HTMLAnchorElement.prototype.click = origClick;
+        return { __noBtn: true };
+      }
+      btn.click();
+      await new Promise((r) => setTimeout(r, 800));
+      URL.createObjectURL = origCreate;
+      HTMLAnchorElement.prototype.click = origClick;
+      let p = null;
+      try { p = JSON.parse(captured); } catch (e) { p = null; }
+      return {
+        fname: fname || '',
+        isJson: !!p && Array.isArray(p.items),
+        n: p && p.items ? p.items.length : 0,
+        hasExportBtn: true,
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('幽灵记录空态里的「导出备份核对」按钮真的触发导出',
+      ghostExport && ghostExport.hasExportBtn === true && ghostExport.isJson === true &&
+      ghostExport.n === 2 && /\.json$/.test(ghostExport.fname || ''),
+      JSON.stringify(ghostExport));
+
     // 清空测试数据，避免污染用户清单
     await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");
   } finally {

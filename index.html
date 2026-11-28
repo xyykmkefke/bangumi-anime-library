@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.33">
+<meta name="version" content="1.6.34">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.33</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.34</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4641,7 +4641,11 @@
     if (state.tab === 'mine' || searchStatus) renderStatusRow();
 
     if (state.tab === 'mine') {
-      $('statCount').textContent = list.length;
+      // 「收藏 N 部」的 N 必须是真的收藏总数，不能是筛选后的条数。
+      // 原来这里赋的是 list.length：在「我的番剧」里点一下「在看」，
+      // 同一屏上 tab 徽标还写着 5、下面却变成「收藏 1 部」——两个数字互相矛盾，
+      // 用户会以为自己误删了 4 部。统计口径统一走 mineTotal（已排除库中不存在的幽灵记录）。
+      $('statCount').textContent = mineTotal;
     }
 
     var q = state.q.trim();
@@ -4649,7 +4653,11 @@
     var labelText;
     if (state.tab === 'mine') {
       countText = String(list.length);
-      labelText = '部已看番剧';
+      // 「已看番剧」这个说法在「我的番剧」里名不副实：清单同时装着想看/在看/弃番。
+      // 实测 5 部收藏里只有 1 部是「看完」，界面上却写着「5 部已看番剧」，
+      // 而紧挨着的状态行明明白白标着「想看 3 / 在看 1 / 看完 1」——同一屏两个数字打架。
+      // 文案改成只陈述「这是当前筛选下的条数」，具体分布交给状态行。
+      labelText = list.length === mineTotal ? '部收藏' : '部 · 当前筛选';
     } else if (q) {
       countText = String(list.length);
       labelText = '条全库搜索结果';
@@ -4703,9 +4711,20 @@
     emptyActions = [];
     if (!list.length) {
       if (state.tab === 'mine') {
-        if (!Object.keys(myMap).length) {
-          emptyEl.innerHTML = '<b>还没有加入任何番剧</b>切换到「全部番剧」，点击封面即可加入已看列表' +
-            '<br><button class="btn" id="browseAllBtn" type="button">去全部番剧</button>';
+        // 判定用 mineTotal（已排除库中不存在的 id），不能用 Object.keys(myMap).length。
+        // 云同步/数据裁剪会带回库里没有的旧 id，此时 myMap 非空但一条都渲染不出来：
+        // 原来会落到「当前筛选下还没有番剧，换个状态看看」——可用户怎么换状态都没用，
+        // 因为那几条是幽灵记录。这正是记忆中那条「有数据但一条都显示不出来」是独立状态，
+        // 不能落进「筛选筛空了」。幽灵记录另外给一句能解释原因的话。
+        if (!mineTotal) {
+          if (Object.keys(myMap).length) {
+            emptyEl.innerHTML = '<b>收藏里有 ' + Object.keys(myMap).length + ' 条记录不在当前数据库中</b>' +
+              '多来自云同步或旧备份里已被移除的条目，暂时无法展示。' +
+              '<br><button class="btn" id="exportGhostBtn" type="button">导出备份核对</button>';
+          } else {
+            emptyEl.innerHTML = '<b>还没有加入任何番剧</b>切换到「全部番剧」，点击封面即可加入已看列表' +
+              '<br><button class="btn" id="browseAllBtn" type="button">去全部番剧</button>';
+          }
         } else if (q) {
           // 有收藏但被关键词筛空：给出准确文案并支持一键清除
           emptyEl.innerHTML = '<b>没有找到匹配的番剧</b>换个关键词试试' +
@@ -5657,6 +5676,14 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    if (e.target.closest('#exportGhostBtn')) {
+      // 按钮文案承诺的是「导出备份核对」，就必须真的触发导出。
+      // 不能改个文案却没接动作——那正是本轮要消掉的「说了但做不到」。
+      // 导出入口本身的 mineCorrupt 分支与正常分支都在 exportBtn 上，直接复用。
+      var expBtn = $('exportBtn');
+      if (expBtn) expBtn.click();
+      return;
+    }
     var relax = e.target.closest('[data-empty-action]');
     if (relax) {
       var mod = emptyActions[Number(relax.dataset.emptyAction)];
@@ -5683,8 +5710,7 @@
       render();
       return;
     }
-    if (!e.target.closest('#resetFilters')) return;
-    state.q = '';
+    if (!e.target.closest('#resetFilters')) return;    state.q = '';
     searchEl.value = '';
     state.year = String(META.endYear || state.year);
     state.season = 'all';
