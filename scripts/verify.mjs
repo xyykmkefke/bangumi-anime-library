@@ -4116,6 +4116,250 @@ async function main() {
     check('SW 的 fetch catch 都保证返回 Response', badCatch.length === 0,
       badCatch.length ? 'L' + badCatch.join(',L') : '0 处');
 
+    // ---- 无障碍 / 焦点 / 排序（2026-11-28 审计） ----
+    // 与上一批一样：尽量走页面真实入口，不另抄逻辑。
+
+    // ① 时间线的季度分组必须按「年→季」数值降序。季是 1/4/7/10 四档，
+    //    字典序下 "2026-10" < "2026-4"，10 月季会被排到 4 月季后面。
+    //    注意：写 localStorage 之后必须真正 Page.reload —— 内存里的 myMap 是
+    //    模块私有的，光改存储再改 hash，读到的还是旧清单（本断言第一版就栽在这）。
+    const tlPick = await cdp.evaluate(`(() => {
+      const DATA = window.__searchProbe.data();
+      // 选一个「季度最分散」的年份，保证同一年里有 1/4/7/10 多月可比
+      const byYear = {};
+      DATA.forEach((x) => {
+        const d = String(x.d || '');
+        const m = /^(\\d{4})-(\\d{2})-/.exec(d);
+        if (!m) return;
+        const mm = Number(m[2]);
+        const q = mm <= 3 ? 1 : mm <= 6 ? 4 : mm <= 9 ? 7 : 10;
+        const y = m[1];
+        (byYear[y] = byYear[y] || {})[q] = x;
+      });
+      let best = null;
+      Object.keys(byYear).forEach((y) => {
+        const n = Object.keys(byYear[y]).length;
+        if (!best || n > best.n) best = { y: y, n: n, pick: byYear[y] };
+      });
+      if (!best || best.n < 3) return { err: '季度样本不足', n: best ? best.n : 0 };
+      const map = {};
+      const want = [];
+      Object.keys(best.pick).forEach((q) => {
+        const x = best.pick[q];
+        map[String(x.i)] = { s: 'done', t: Date.now(), ep: 0, u: Date.now() };
+        want.push(q);
+      });
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(map));
+      localStorage.removeItem('yuc_prefs_v1');
+      // gb=air 才是「按首播季度分组」；gr 是类型筛选，第一版写错成 gr 了
+      history.replaceState(null, '', location.pathname + '#tab=mine&gb=air&y=all&s=all&v=grid');
+      return { y: best.y, n: Object.keys(best.pick).length, want: want.sort((a, b) => b - a) };
+    })()`).catch((e) => ({ err: e.message }));
+
+    let tlHeads = [];
+    if (tlPick && !tlPick.err) {
+      await cdp.send('Page.reload');
+      for (let i = 0; i < 40; i += 1) {
+        const heads = await cdp.evaluate(`(() => {
+          const hs = [].slice.call(document.querySelectorAll('.tl-head'))
+            .map((h) => (h.textContent || '').replace(/\\s+/g, ' ').trim());
+          return hs.length ? hs : null;
+        })()`).catch(() => null);
+        if (heads) { tlHeads = heads; break; }
+        await sleep(250);
+      }
+    }
+    // 判据：标题里的「N 月」必须是真降序（10 → 7 → 4 → 1）
+    const seasonsInHeads = tlHeads
+      .map((h) => { const m = /(\d+) 月/.exec(h); return m ? Number(m[1]) : null; })
+      .filter((v) => v != null);
+    const seasonDesc = seasonsInHeads.every((v, i) => i === 0 || seasonsInHeads[i - 1] >= v);
+    check('时间线季度分组按数值降序（10 月季不排在 4 月季之后）',
+      seasonsInHeads.length >= 3 && seasonDesc,
+      `年份 ${tlPick && tlPick.y}，样本 ${tlPick && tlPick.n} 条，标题序列 [${seasonsInHeads.join(',')}]` +
+      (tlPick && tlPick.err ? ' ' + tlPick.err : ''));
+
+    // ② 状态按钮的选中态必须有 aria-pressed，不能只有 .active 类。
+    //    这是纯颜色表达，读屏完全感知不到当前是什么状态。
+    //    同样必须先落存储再重载，否则详情里 collected=false、按钮根本不渲染。
+    const statusPick = await cdp.evaluate(`(() => {
+      const DATA = window.__searchProbe.data();
+      const x = DATA.find((it) => it && it.i);
+      if (!x) return { err: '无数据' };
+      localStorage.setItem('yuc_my_anime_v1',
+        JSON.stringify({ [String(x.i)]: { s: 'doing', t: Date.now(), ep: 1, u: Date.now() } }));
+      localStorage.removeItem('yuc_prefs_v1');
+      history.replaceState(null, '', location.pathname + '#d=' + encodeURIComponent(String(x.i)));
+      return { id: String(x.i) };
+    })()`).catch((e) => ({ err: e.message }));
+
+    let statusAria = { total: 0, withAria: 0, trueOnes: [], active: [] };
+    if (statusPick && !statusPick.err) {
+      await cdp.send('Page.reload');
+      for (let i = 0; i < 40; i += 1) {
+        const got = await cdp.evaluate(`(() => {
+          const btns = [].slice.call(document.querySelectorAll('#statusOpts [data-status]'));
+          if (!btns.length) return null;
+          return {
+            total: btns.length,
+            withAria: btns.filter((b) => b.hasAttribute('aria-pressed')).length,
+            trueOnes: btns.filter((b) => b.getAttribute('aria-pressed') === 'true')
+              .map((b) => b.getAttribute('data-status')),
+            active: btns.filter((b) => b.classList.contains('active'))
+              .map((b) => b.getAttribute('data-status')),
+          };
+        })()`).catch(() => null);
+        if (got) { statusAria = got; break; }
+        await sleep(250);
+      }
+    }
+    check('状态按钮的选中态暴露 aria-pressed',
+      statusAria.total > 0 && statusAria.withAria === statusAria.total,
+      statusPick && statusPick.err ? statusPick.err : `${statusAria.withAria}/${statusAria.total}`);
+    // 边界断言与主断言是两个独立性质：只测「有属性」不够，还要测「值正确」——
+    // 一个「每个按钮都写 aria-pressed=false」的实现会让上一条全绿通关。
+    check('aria-pressed 的值与视觉选中态一致',
+      JSON.stringify(statusAria.trueOnes) === JSON.stringify(statusAria.active) &&
+      statusAria.trueOnes.length === 1 && statusAria.trueOnes[0] === 'doing',
+      `aria=${JSON.stringify(statusAria.trueOnes)} 视觉=${JSON.stringify(statusAria.active)}`);
+
+    // ③ 详情打开时必须锁住背景：main 要 inert/aria-hidden，body 要 modal-open。
+    //    缺了它，读屏能读到背后 240 张卡片、滚轮会把背景带走。
+    //    关闭走真实入口（#modalClose 按钮 / Esc），不靠手动清 hash ——
+    //    手动清 hash 测的是 hashchange 分支，不是用户实际走的路径。
+    const modalLock = await cdp.evaluate(`(async () => {
+      const DATA = window.__searchProbe.data();
+      const x = DATA.find((it) => it && it.i);
+      if (!x) return { err: '无数据' };
+      // 先确保是干净的关闭态：上一条断言可能留下了打开的弹窗，
+      // 那样本次「打开」其实什么都没发生，后面的恢复断言就会假 PASS。
+      const close0 = document.getElementById('modalClose');
+      if (close0 && !document.getElementById('modal').hidden) {
+        close0.click();
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const preMain = document.querySelector('main');
+      const preClean = document.getElementById('modal').hidden === true &&
+        (preMain.inert !== true && !preMain.hasAttribute('aria-hidden')) &&
+        !document.body.classList.contains('modal-open');
+      location.hash = '#d=' + encodeURIComponent(String(x.i));
+      await new Promise((r) => setTimeout(r, 500));
+      const main = document.querySelector('main');
+      const modal = document.getElementById('modal');
+      const opened = modal && !modal.hidden;
+      const inert = main && (main.inert === true || main.getAttribute('aria-hidden') === 'true');
+      const scrollLocked = document.body.classList.contains('modal-open');
+      // 关闭后必须全部复位，否则页面永久锁死
+      const close = document.getElementById('modalClose');
+      if (close) close.click();
+      await new Promise((r) => setTimeout(r, 500));
+      const closed = modal && modal.hidden;
+      const restored = main && main.inert !== true && !main.hasAttribute('aria-hidden');
+      const unlock = !document.body.classList.contains('modal-open');
+      // 关键：把「打开成功过」也带出来。关闭类断言必须以「曾经打开」为前提——
+      // 缺陷态下弹窗可能根本没打开，closed/restored/unlock 全部天然为真，
+      // 这条断言就会假 PASS（反向验证时实测踩到）。
+      return { preClean: preClean, opened: opened, inert: inert, scrollLocked: scrollLocked,
+        closed: closed, restored: restored, unlock: unlock };
+    })()`).catch((e) => ({ err: e.message }));
+    check('详情打开时背景被 inert 且滚动被锁',
+      modalLock && modalLock.preClean === true && modalLock.opened === true &&
+      modalLock.inert === true && modalLock.scrollLocked === true,
+      JSON.stringify(modalLock));
+    // 反向性质：关闭后必须复位。只测「打开时锁住」的实现可能永远不解锁，
+    // 页面从此滚不动——这是两个独立性质，必须分开断言。
+    check('详情关闭后背景锁定被解除',
+      modalLock && modalLock.opened === true && modalLock.closed === true &&
+      modalLock.restored === true && modalLock.unlock === true,
+      `opened=${modalLock && modalLock.opened} closed=${modalLock && modalLock.closed} ` +
+      `restored=${modalLock && modalLock.restored} unlock=${modalLock && modalLock.unlock}`);
+
+    // ④ 焦点陷阱：焦点跑到弹窗外（点了遮罩空白）时，Tab 必须被拉回弹窗内。
+    //    原来只判「等于 first」「等于 last」，两种情况都不是时 Tab 直接逃逸。
+    const trapEscape = await cdp.evaluate(`(async () => {
+      const DATA = window.__searchProbe.data();
+      const x = DATA.find((it) => it && it.i);
+      if (!x) return { err: '无数据' };
+      location.hash = '#d=' + x.i;
+      await new Promise((r) => setTimeout(r, 400));
+      const modal = document.getElementById('modal');
+      // 把焦点强行移到 body（模拟点击遮罩空白后的状态）
+      document.body.focus();
+      document.activeElement && document.activeElement.blur && document.activeElement.blur();
+      // 派发一次 Tab
+      const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      document.dispatchEvent(ev);
+      await new Promise((r) => setTimeout(r, 200));
+      const inside = modal.contains(document.activeElement);
+      location.hash = '';
+      await new Promise((r) => setTimeout(r, 300));
+      return { inside: inside };
+    })()`).catch((e) => ({ err: e.message }));
+    check('焦点在弹窗外时 Tab 被拉回弹窗内', trapEscape && trapEscape.inside === true,
+      JSON.stringify(trapEscape));
+
+    // ⑤ 无日期条目不能被塞进「周一」列当作真实排播。
+    //    数据里确有「星门」这一条 d 为空，但 adoptData() 里 `.filter(x => x.d)`
+    //    会把它挡在 DATA 之外 —— 所以「造一条无日期收藏再看日历」这条路在真实
+    //    数据下根本走不通（第一版就是这样空跑跳过的，等于什么都没测）。
+    //    改为直接调用真实渲染函数 calendarHtml，用真代码判它落到哪一列。
+    const calUnknown = await cdp.evaluate(`(() => {
+      const render = window.__searchProbe.calendarHtml;
+      if (typeof render !== 'function') return { err: '未暴露 calendarHtml' };
+      const noDate = { i: 999999001, cn: '无日期测试条目', n: '无日期测试条目', d: '' };
+      const norm = { i: 999999002, cn: '有日期对照条目', n: '有日期对照条目', d: '2020-01-06' };
+      const html = render([noDate, norm]);
+      const box = document.createElement('div');
+      box.innerHTML = html;
+      const heads = [].slice.call(box.querySelectorAll('.cal-head')).map((h) => (h.textContent || '').trim());
+      const el = box.querySelector('.cal-item[data-id="' + noDate.i + '"]');
+      const col = el ? el.closest('.cal-col') : null;
+      const colHead = col && col.querySelector('.cal-head') ? col.querySelector('.cal-head').textContent.trim() : '';
+      // 对照条目必须落在「周一」（2020-01-06 是周一），证明渲染本身正常
+      const normEl = box.querySelector('.cal-item[data-id="' + norm.i + '"]');
+      const normCol = normEl ? normEl.closest('.cal-col') : null;
+      const normHead = normCol && normCol.querySelector('.cal-head') ? normCol.querySelector('.cal-head').textContent.trim() : '';
+      return { heads: heads, colHead: colHead, normHead: normHead };
+    })()`).catch((e) => ({ err: e.message }));
+    check('无日期条目归入「日期待定」列而非伪装成周一',
+      calUnknown && String(calUnknown.colHead || '').indexOf('日期待定') === 0 &&
+      String(calUnknown.normHead || '').indexOf('周一') === 0,
+      calUnknown && calUnknown.err ? calUnknown.err
+        : `待定条目落列=${JSON.stringify(calUnknown && calUnknown.colHead)} 对照条目落列=${JSON.stringify(calUnknown && calUnknown.normHead)}`);
+
+    // ⑥ Esc 收起移动端搜索后，aria-expanded 必须同步成 false。
+    const escAria = await cdp.evaluate(`(async () => {
+      const toggle = document.getElementById('searchToggle');
+      const bar = document.querySelector('.topbar');
+      if (!toggle || !bar) return { err: '缺元素' };
+      toggle.click();
+      await new Promise((r) => setTimeout(r, 150));
+      const afterOpen = toggle.getAttribute('aria-expanded');
+      // 按 Esc
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      const afterEsc = toggle.getAttribute('aria-expanded');
+      const stillOpen = bar.classList.contains('search-open');
+      return { afterOpen: afterOpen, afterEsc: afterEsc, stillOpen: stillOpen };
+    })()`).catch((e) => ({ err: e.message }));
+    check('Esc 收起搜索后 aria-expanded 同步为 false',
+      escAria && escAria.afterOpen === 'true' && escAria.afterEsc === 'false' && escAria.stillOpen === false,
+      JSON.stringify(escAria));
+
+    // ⑦ 结果数必须对读屏可见（aria-live），否则输入关键词后完全静默。
+    const liveRegion = await cdp.evaluate(`(() => {
+      const el = document.getElementById('resultLive');
+      if (!el) return { err: '无 #resultLive' };
+      return {
+        live: el.getAttribute('aria-live'),
+        role: el.getAttribute('role'),
+        hasCount: !!el.querySelector('#resultCount'),
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('结果数区域对读屏可见（aria-live）',
+      liveRegion && liveRegion.live === 'polite' && liveRegion.role === 'status' && liveRegion.hasCount === true,
+      JSON.stringify(liveRegion));
+
 
     // ---- 全库数据：串行回退 + 超时不弃数据 + 双份缓存清理 ----
     // 关键不变量是「串行」而不是「排序」：并行竞速（哪怕错开 1.2s）在真实冷启动下挡不住双下

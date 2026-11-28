@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.28">
+<meta name="version" content="1.6.29">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2301,6 +2301,13 @@
   }
   .sheet-head b { font-size: 15px; }
   body.sheet-open { overflow: hidden; }
+  /* 详情弹窗打开时锁背景滚动，避免滚轮在遮罩上滚把背后的列表带走。
+     用 scrollbar-gutter 预留滚动条位置：直接 overflow:hidden 会让滚动条消失、
+     页面宽度跳一下（桌面端能看到内容横向抖动）。 */
+  body.modal-open {
+    overflow: hidden;
+    scrollbar-gutter: stable;
+  }
 
   /* 用户端设置：字号、卡片密度、动效 */
   html[data-font="sm"] { --fs-body: 13px; }
@@ -2485,7 +2492,10 @@
   <div class="statusrow" id="statusRow" hidden></div>
 
   <div class="resultbar" id="resultbar">
-    <b id="resultCount">0</b><span id="resultLabel"></span>
+    <!-- 结果数变化要让读屏感知：输入关键词后从 240 变成 3，纯文本节点是静默的，
+         读屏用户会以为「没反应」。只包住数字与说明文字，不包 select——
+         否则切换视图也会被播报成「结果数变化」。 -->
+    <span id="resultLive" role="status" aria-live="polite" aria-atomic="true"><b id="resultCount">0</b><span id="resultLabel"></span></span>
     <select class="viewselect" id="viewSelect" aria-label="视图" title="切换视图">
       <option value="grid">网格</option>
       <option value="list">列表</option>
@@ -2508,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.28</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.29</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4115,16 +4125,27 @@
         var joined = entry && entry.t ? new Date(entry.t).getFullYear() : 0;
         key = joined ? String(joined) : '0000';
       } else {
-        key = yearOf(x.d) + '-' + quarterOf(x.d);
+        // yearOf 为空（d 是空串）时不能拼出 "-0" 这种键，
+        // 否则分组标题会渲染成「 年 档期未知」（前面多个空格），
+        // 而且它会被排到 "2026-1" 之前，一个没有日期的条目霸占时间线首位。
+        key = yearOf(x.d) ? yearOf(x.d) + '-' + quarterOf(x.d) : '0000-0';
       }
       (groups[key] = groups[key] || []).push(x);
     });
-    return Object.keys(groups).sort().reverse().map(function (key) {
+    // 按「年 → 季」数值降序，不能靠字典序。
+    // 季是 1/4/7/10 四档，字典序下 "2026-10" < "2026-4"，于是 10 月季被排到
+    // 4 月季后面（实测 "2026-7 | 2026-4 | 2026-10 | 2026-1"）。时间线里季度顺序错乱
+    // 会让「上一季在看什么」这个用途直接失效。'0000-0'（无日期）自然落到最末。
+    return Object.keys(groups).sort(function (a, b) {
+      var pa = a.split('-');
+      var pb = b.split('-');
+      return (Number(pb[0]) - Number(pa[0])) || (Number(pb[1] || 0) - Number(pa[1] || 0));
+    }).map(function (key) {
       var parts = key.split('-');
       var season = Number(parts[1]);
       var label = byAdded
         ? (Number(parts[0]) ? parts[0] + ' 年加入' : '加入时间未知')
-        : parts[0] + ' 年 ' + (season ? season + ' 月' : '档期未知');
+        : (Number(parts[0]) ? parts[0] + ' 年 ' + (season ? season + ' 月' : '档期未知') : '档期未知');
       return '<section class="tl-group"><h3 class="tl-head">' + label +
         '<span>' + groups[key].length + ' 部</span></h3>' +
         '<div class="grid">' + groups[key].map(cardHtml).join('') + '</div></section>';
@@ -4165,33 +4186,49 @@
   var WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
   // 本季日历：按首播日期的星期分列，快速看每天有什么
+  //
+  // 日期不完整的条目要单独一列，不能默认塞进周一。
+  // 原先 `day = ... : 1`，于是「星门」（数据里 d 为空）被渲染在「周一」列，
+  // 页面上看起来就是「星门 每周一更新」——这是凭空造出来的排播信息，
+  // 比不显示更糟。数据里目前只有 1 条，但这不是「量少可以忽略」，
+  // 而是「显示错误信息」。
   function calendarHtml(list) {
     var cols = WEEK_LABELS.map(function () { return []; });
+    var unknown = [];
     list.forEach(function (x) {
       var d = x.d ? new Date(x.d + 'T00:00:00') : null;
-      var day = d && !isNaN(d.getTime()) ? d.getDay() : 1;
-      cols[day].push(x);
+      if (d && !isNaN(d.getTime())) cols[d.getDay()].push(x);
+      else unknown.push(x);
     });
-    return cols.map(function (items, i) {
-      items.sort(function (a, b) { return String(a.d).localeCompare(String(b.d)); });
-      return '<section class="cal-col"><h3 class="cal-head">' + WEEK_LABELS[i] +
+    // 单条日历项抽成函数：七个星期列 + 「日期待定」列要渲染同一种卡片，
+    // 复制一份的话以后改样式必然漏掉一处。
+    function calItem(x) {
+      var titleText = x.cn || x.n || '未知番剧';
+      var entry = myMap[String(x.i)];
+      return '<a class="cal-item" href="#d=' + escapeHtml(String(x.i)) + '" data-id="' + escapeHtml(String(x.i)) + '">' +
+        '<span class="ci-cover"><span class="ci-ph">' + escapeHtml(String(titleText).charAt(0)) + '</span>' +
+        (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
+          (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="40px"' : '') +
+          ' alt="" onerror="this.style.display=\'none\'">' : '') +
+        '</span>' +
+        '<span class="ci-main"><span class="ci-date">' + escapeHtml(x.d || '日期待定') + '</span>' +
+        '<span class="ci-title">' + highlightHtml(titleText, state.q.trim()) + '</span>' +
+        (entry ? '<span class="ci-state">' + escapeHtml(STATUS[entry.s] || '') + '</span>' : '') +
+        '</span></a>';
+    }
+    function calCol(label, items) {
+      return '<section class="cal-col"><h3 class="cal-head">' + label +
         ' · ' + items.length + '</h3>' +
-        (items.length ? items.map(function (x) {
-          var titleText = x.cn || x.n || '未知番剧';
-          var entry = myMap[String(x.i)];
-          return '<a class="cal-item" href="#d=' + escapeHtml(String(x.i)) + '" data-id="' + escapeHtml(String(x.i)) + '">' +
-            '<span class="ci-cover"><span class="ci-ph">' + escapeHtml(String(titleText).charAt(0)) + '</span>' +
-            (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
-              (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="40px"' : '') +
-              ' alt="" onerror="this.style.display=\'none\'">' : '') +
-            '</span>' +
-            '<span class="ci-main"><span class="ci-date">' + escapeHtml(x.d || '日期待定') + '</span>' +
-            '<span class="ci-title">' + highlightHtml(titleText, state.q.trim()) + '</span>' +
-            (entry ? '<span class="ci-state">' + escapeHtml(STATUS[entry.s] || '') + '</span>' : '') +
-            '</span></a>';
-        }).join('') : '<div class="cal-empty">无</div>') +
+        (items.length ? items.map(calItem).join('') : '<div class="cal-empty">无</div>') +
         '</section>';
+    }
+    var html = cols.map(function (items, i) {
+      items.sort(function (a, b) { return String(a.d).localeCompare(String(b.d)); });
+      return calCol(WEEK_LABELS[i], items);
     }).join('');
+    // 日期待定单独一列，且只在这一列真的有条目时才出现
+    if (unknown.length) html += calCol('日期待定', unknown);
+    return html;
   }
 
   // ---- 已启用筛选的 chips：可单独移除，避免“为什么结果变少” ----
@@ -4490,9 +4527,12 @@
     if (state.tab === 'mine' && state.view === 'calendar') state.view = 'grid';
     if (state.tab === 'all' && state.view === 'board') state.view = 'grid';
     // 「显示更多」展开的条数：只有筛选条件真正变化才收回第一批，否则任何一次重渲染都会把列表缩回去
+    // bulk 也要进 key：进出批量选择会改变卡片结构（多出勾选框），属于列表变化，
+    // 但更重要的是它不该影响 limit——放进 key 后，进出 bulk 会重置到首屏，
+    // 避免「批量选了 300 条之后退出，列表仍只显示 240 条却说不清为什么」。
     var listKey = [state.tab, state.year, state.season, state.platform, state.region, state.genre, state.sort,
       state.status, state.onlyMine, state.highScore, state.hideMine, state.view, state.group, state.groupBy,
-      state.mineSort, state.q].join('|');
+      state.mineSort, state.q, state.bulk ? 1 : 0].join('|');
     if (listKey !== lastListKey) {
       lastListKey = listKey;
       state.limit = PAGE_SIZE;
@@ -4753,8 +4793,12 @@
     }).join('') + jumpHtml + genreHtml;
     var opts = $('statusOpts');
     opts.hidden = !collected;
+    // 选中态不能只靠 .active 类：那只是颜色，读屏完全感知不到。
+    // 用 aria-pressed 表达「这一个是当前状态」，读屏会播报「已按下」。
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
-      return '<button data-status="' + s + '"' + (myMap[id].s === s ? ' class="active"' : '') + '>' + STATUS[s] + '</button>';
+      var on = myMap[id].s === s;
+      return '<button data-status="' + s + '" aria-pressed="' + on + '"' +
+        (on ? ' class="active"' : '') + '>' + STATUS[s] + '</button>';
     }).join('') : '';
     var btn = $('detailToggle');
     btn.textContent = collected ? '移出我的番剧' : '加入我的番剧';
@@ -4782,12 +4826,44 @@
     pendingDetail = null;
     renderDetail(id);
     modalEl.hidden = false;
+    // 打开详情要锁住背景：
+    //   ① inert —— 读屏和 Tab 都读不到/走不到背后的 240 张卡片。
+    //      #modal 有 aria-modal="true" 只是声明，实际仍能被虚拟光标读到。
+    //   ② 滚动锁 —— 否则滚轮在遮罩上滚会把背后的列表带走，关掉后位置全乱。
+    //   记录 scrollY 是因为部分浏览器在 overflow:hidden 时会跳回顶部。
+    modalScrollY = window.scrollY || window.pageYOffset || 0;
+    lockBackground(true);
     $('detailToggle').focus();
     if (switched) {
       var panel = modalEl.querySelector('.modal-panel');
       if (panel) panel.scrollTop = 0;
     }
     writeHash();
+  }
+
+  // 背景锁定：inert 属性（现代浏览器）优先，老浏览器退回 aria-hidden + 滚动锁。
+  // 只锁 main 与 topbar，不动 modal 本身（它是 body 的直接子节点）。
+  var modalScrollY = 0;
+  function lockBackground(on) {
+    var bg = [document.querySelector('main'), document.querySelector('.topbar')];
+    bg.forEach(function (el) {
+      if (!el) return;
+      if (on) {
+        if ('inert' in el) el.inert = true;
+        el.setAttribute('aria-hidden', 'true');
+      } else {
+        if ('inert' in el) el.inert = false;
+        el.removeAttribute('aria-hidden');
+      }
+    });
+    if (on) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+      // overflow:hidden 解除后浏览器可能把滚动位置重置成 0，主动恢复
+      if (modalScrollY) window.scrollTo(0, modalScrollY);
+      modalScrollY = 0;
+    }
   }
 
   function closeDetail() {
@@ -4797,6 +4873,7 @@
     lastModalFocus = null;
     modalEl.hidden = true;
     modalId = null;
+    lockBackground(false);
     writeHash();
     // Esc / 关闭后把焦点还给触发卡片，键盘用户不丢失位置
     if (!back || !document.contains(back) || back.offsetParent === null) {
@@ -5405,7 +5482,21 @@
       closePalette();
       closeMenus();
       var bar = document.querySelector('.topbar');
-      if (bar) bar.classList.remove('search-open');
+      if (bar) {
+        // 只有真的收起过才需要同步 aria：原先无条件 remove，也就无条件把
+        // aria-expanded 留在 "true"，读屏播报「已展开」而面板其实已消失。
+        // 同时把焦点还给触发按钮，否则焦点留在被 display:none 的输入框上、
+        // 直接掉到 body。
+        var wasOpen = bar.classList.contains('search-open');
+        bar.classList.remove('search-open');
+        if (wasOpen) {
+          var toggle = $('searchToggle');
+          if (toggle) {
+            toggle.setAttribute('aria-expanded', 'false');
+            if (searchEl === document.activeElement) toggle.focus();
+          }
+        }
+      }
     }
   });
 
@@ -6077,10 +6168,19 @@
     if (!focusables.length) return;
     var first = focusables[0];
     var last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    var active = document.activeElement;
+    // 焦点已在弹窗之外（用户点了遮罩空白处、或 activeElement 掉到 body）：
+    // 原来只判「等于 first」与「等于 last」，这两种情况都不是，于是 Tab 直接
+    // 走到背后被 inert 的内容之外，焦点逃出弹窗。这里先把它拉回来。
+    if (!container.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+      return;
+    }
+    if (e.shiftKey && active === first) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
+    } else if (!e.shiftKey && active === last) {
       e.preventDefault();
       first.focus();
     }
@@ -6844,7 +6944,17 @@
     if (applyingHash) return;
     applyingHash = true;
     try {
-      if (applyStateMap(parseHash())) {
+      var incoming = parseHash();
+      if (!incoming) {
+        // hash 被整体清空（粘裸链接、后退到初始态）：parseHash() 返回 null，
+        // 以前这里直接跳过整个分支，详情弹窗就那么留在屏幕上 —— URL 已经没有
+        // #d= 了，界面还停在某一部番剧上。此时若再点别的卡片，writeHash 会把
+        // 旧 id 写回 URL，地址栏和界面互相打脸。
+        // 没有状态可恢复时唯一正确的事是把详情收起来。
+        closeDetail();
+        return;
+      }
+      if (applyStateMap(incoming)) {
         var wanted = hashDetailId();
         syncControls();
         pendingDetail = wanted && !byId.has(wanted) ? wanted : null;
@@ -7221,6 +7331,10 @@
     // 转义出口：验收要验证「单引号/反引号/尖括号是否被实体化」，
     // 只能走真实渲染函数，不能在测试里另抄一份 escapeHtml（抄的那份永远测不出回归）。
     highlightHtml: highlightHtml,
+    // 日历渲染出口：库里的无日期条目会被 adoptData 的 .filter(x => x.d) 挡在
+    // DATA 之外，「造一条无日期收藏」这条路在真实数据下根本走不通（断言只能
+    // 空跑跳过）。直接把渲染函数暴露出来，用真实代码判「无日期落到哪一列」。
+    calendarHtml: calendarHtml,
   };
 })();
 </script>
