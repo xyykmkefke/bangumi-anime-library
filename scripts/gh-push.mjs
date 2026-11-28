@@ -143,9 +143,14 @@ for (const { status, path: rel } of files) {
     console.log('delete', rel);
     continue;
   }
-  const content = readFileSync(path.join(ROOT, rel));
+  // 必须从 git 对象库读，不能 readFileSync 读工作区文件。
+  // 本机 core.autocrlf 打开时，工作区是 CRLF、仓库里是 LF，同一个文件两种字节
+  // → blob SHA 必然不同 → 下面「构造的 remote tree 与本地 HEAD 不一致」必然误报。
+  // 实测踩过：v1.6.34 的文档同步（只有 .md 改动）被这条卡住，而代码提交因为
+  // 恰好只改了 LF 文件才侥幸通过。判据：任何要计算 blob SHA 的地方都必须读 HEAD，
+  // 读工作区等于把换行符转换也算进内容里。
   const blob = ghJson([`--method`, 'POST', `repos/${REPO}/git/blobs`], {
-    content: content.toString('base64'),
+    content: execFileSync('git', ['cat-file', 'blob', `HEAD:${rel}`], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString('base64'),
     encoding: 'base64',
   });
   tree.push({ path: rel, mode: '100644', type: 'blob', sha: blob.sha });
