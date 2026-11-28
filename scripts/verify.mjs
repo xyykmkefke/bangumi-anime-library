@@ -1356,7 +1356,11 @@ async function main() {
     })()`);
     check(
       '导入合并且不覆盖本地状态',
-      importResult === 'doing|done|want|3|导入完成：新增 1 部，合并 2 部',
+      // 判据只匹配文案主体，不比对整段 textContent：toast 上的「撤销」按钮文字
+      // 也会进 textContent，写成全文相等后，给提示加个按钮就会把这条断言打挂
+      // （实际发生过一次）。这里用前缀 + 状态三段来判断。
+      importResult && importResult.indexOf('doing|done|want|3|') === 0 &&
+      /^导入完成：新增 1 部，合并 2 部/.test(importResult.split('|')[4] || ''),
       importResult,
     );
 
@@ -2930,7 +2934,9 @@ async function main() {
     })()`);
     check(
       '导入备份跳过无效条目并提示',
-      importSkipInfo === '1|doing|导入完成：新增 1 部，合并 0 部，跳过 1 条无效记录',
+      // 同样只匹配文案主体（见上一条的说明）
+      importSkipInfo && importSkipInfo.indexOf('1|doing|') === 0 &&
+      /^导入完成：新增 1 部，合并 0 部，跳过 1 条无效记录/.test(importSkipInfo.split('|')[2] || ''),
       importSkipInfo,
     );
 
@@ -4681,8 +4687,201 @@ async function main() {
       detailUndo.textAfterUndo === '移出我的番剧',
       JSON.stringify(detailUndo));
 
+    // ⑪ 删除视图必须有撤销。保存的视图是用户手搭的筛选组合，误点删除就没了。
+    //    此前既没有撤销、连提示都没有——`splice` 删完直接重绘，静默丢数据。
+    const viewsReset = await cdp.evaluate(`(() => {
+      localStorage.setItem('yuc_my_anime_v1', '{}');
+      localStorage.setItem('yuc_views_v1', JSON.stringify([
+        { name: 'A视图', tab: 'all', year: '2026', season: '1', sort: 'score' },
+        { name: 'B视图', tab: 'mine', mineSort: 'updated' },
+        { name: 'C视图', tab: 'all', year: '2025', sort: 'heat' }
+      ]));
+      localStorage.removeItem('yuc_prefs_v1');
+      return 1;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const viewUndo = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const btn = document.getElementById('viewsBtn');
+      if (!btn) return { err: '无 #viewsBtn' };
+      btn.click();
+      await sleep(450);
+      const dels = document.querySelectorAll('[data-view-del]');
+      if (dels.length < 3) return { err: '视图按钮不足', n: dels.length };
+      // 删中间那个，验证撤销能按原下标插回（不能一律追加到末尾）
+      dels[1].click();
+      await sleep(400);
+      const after = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      const hasUndo = !!document.getElementById('toastAct');
+      const u = document.getElementById('toastAct');
+      if (u) u.click();
+      await sleep(450);
+      const back = JSON.parse(localStorage.getItem('yuc_views_v1') || '[]').map((v) => v.name);
+      return { after, hasUndo, back };
+    })()`).catch((e) => ({ err: e.message }));
+    check('删除已保存视图有撤销，且按原位置恢复',
+      viewUndo && viewUndo.hasUndo === true &&
+      viewUndo.after && viewUndo.after.length === 2 &&
+      viewUndo.back && viewUndo.back.join(',') === 'A视图,B视图,C视图',
+      JSON.stringify(viewUndo));
+
+    // ⑫ 导入必须有撤销。导入的「合并」是单调加法：已有条目的进度取 max，
+    //    导入一份旧备份后本地进度被推高，界面上没有任何入口能改回去。
+    const importIds = await cdp.evaluate(`(() => {
+      const D = window.__searchProbe.data();
+      const a = String(D[5].i), b = String(D[6].i);
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [a]: { s: 'doing', t: 1700000000000, ep: 2, u: 1700000001000 }
+      }));
+      localStorage.removeItem('yuc_deleted_v1');
+      localStorage.removeItem('yuc_prefs_v1');
+      return JSON.stringify({ a, b });
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const importRes = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const IDS = ${JSON.stringify(importIds)};
+      if (typeof IDS !== 'string') return { err: '前置失败' };
+      const { a: A, b: B } = JSON.parse(IDS);
+      const before = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      // 走真实入口：构造 File 塞进 #fileInput 再派发 change
+      const backup = { items: [
+        { id: A, status: 'done', ep: 12 },   // 已有条目：进度会被推高
+        { id: B, status: 'want', ep: 0 }     // 新条目
+      ] };
+      const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('fileInput');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(750);
+      const afterImport = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const hasUndo = !!document.getElementById('toastAct');
+      const u = document.getElementById('toastAct');
+      if (u) u.click();
+      await sleep(650);
+      const afterUndo = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      const del = JSON.parse(localStorage.getItem('yuc_deleted_v1') || '{}');
+      return {
+        beforeEp: before[A] && before[A].ep,
+        importEp: afterImport[A] && afterImport[A].ep,
+        importAddedB: !!afterImport[B],
+        hasUndo,
+        undoEp: afterUndo[A] && afterUndo[A].ep,
+        undoRemovedB: !afterUndo[B],
+        tombstoneForB: !!del[B]
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('导入备份有撤销，且把进度回滚到导入前',
+      importRes && importRes.hasUndo === true &&
+      importRes.beforeEp === 2 && importRes.importEp === 12 && importRes.undoEp === 2,
+      JSON.stringify(importRes));
+    // 撤销新增条目时必须补墓碑，否则云同步会把这条从远端又拉回来。
+    // 这与上一条是两个独立性质：只测「进度回滚」的话，一个「删了但不写墓碑」的实现会全绿通关。
+    check('撤销导入删除新增条目时补写墓碑',
+      importRes && importRes.importAddedB === true &&
+      importRes.undoRemovedB === true && importRes.tombstoneForB === true,
+      JSON.stringify(importRes));
+
+    // ⑬ 导入撤销的边界：导入之后又被改动过的条目不能一并回滚。
+    //    撤销导入 ≠ 撤销导入后的一切操作。
+    const dirtyRes = await cdp.evaluate(`(() => {
+      const IDS = ${JSON.stringify(importIds)};
+      const A = JSON.parse(IDS).a;
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [A]: { s: 'doing', t: 1700000000000, ep: 2, u: 1700000001000 }
+      }));
+      localStorage.removeItem('yuc_deleted_v1');
+      return 1;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const dirtyUndo = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const IDS = ${JSON.stringify(importIds)};
+      const A = JSON.parse(IDS).a;
+      const backup = { items: [{ id: A, status: 'done', ep: 12 }] };
+      const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('fileInput');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(750);
+      const importEp = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[A].ep;
+      // 导入后这一条又被改过：走 storage 事件（真实的外部改动路径），
+      // 不用界面上点按钮 —— 那会让撤销按钮被新提示覆盖，测不到目标分支
+      const cur = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}');
+      cur[A] = { s: 'doing', t: cur[A].t, ep: 5, u: Date.now() + 5000 };
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify(cur));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'yuc_my_anime_v1', newValue: JSON.stringify(cur), storageArea: localStorage
+      }));
+      await sleep(500);
+      const u = document.getElementById('toastAct');
+      if (!u) return { err: '撤销按钮不在了' };
+      u.click();
+      await sleep(650);
+      const after = JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[A];
+      return { importEp, afterEp: after && after.ep,
+        toast: (document.getElementById('toast').textContent || '').slice(0, 60) };
+    })()`).catch((e) => ({ err: e.message }));
+    check('撤销导入不覆盖导入后被改动过的条目',
+      dirtyUndo && dirtyUndo.importEp === 12 && dirtyUndo.afterEp === 12 &&
+      /未回滚/.test(dirtyUndo.toast || ''),
+      JSON.stringify(dirtyUndo));
+
+    // ⑭ 导入没有实际改动时不给撤销按钮：一个点了什么都不会发生的按钮比没有更差。
+    const noopRes = await cdp.evaluate(`(() => {
+      const IDS = ${JSON.stringify(importIds)};
+      const A = JSON.parse(IDS).a;
+      localStorage.setItem('yuc_my_anime_v1', JSON.stringify({
+        [A]: { s: 'doing', t: 1700000000000, ep: 9, u: 1700000001000 }
+      }));
+      localStorage.removeItem('yuc_deleted_v1');
+      return 1;
+    })()`).catch((e) => e.message);
+    await cdp.send('Page.reload');
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      await sleep(250);
+    }
+    const noopImport = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const IDS = ${JSON.stringify(importIds)};
+      const A = JSON.parse(IDS).a;
+      // 备份进度比本地小 → 合并取 max 后没有任何变化
+      const backup = { items: [{ id: A, status: 'doing', ep: 1 }] };
+      const file = new File([JSON.stringify(backup)], 'b.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('fileInput');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(750);
+      return {
+        hasUndo: !!document.getElementById('toastAct'),
+        ep: JSON.parse(localStorage.getItem('yuc_my_anime_v1') || '{}')[A].ep
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    check('导入无实际改动时不提供撤销按钮',
+      noopImport && noopImport.hasUndo === false && noopImport.ep === 9,
+      JSON.stringify(noopImport));
+
     // 清空测试数据，避免污染用户清单
-    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1');");
+    await cdp.evaluate("localStorage.removeItem('yuc_my_anime_v1'); localStorage.removeItem('yuc_prefs_v1'); localStorage.removeItem('yuc_backup_v1'); localStorage.removeItem('yuc_continue_sort_v1'); localStorage.removeItem('yuc_dirty_v1'); localStorage.removeItem('yuc_deleted_v1'); localStorage.removeItem('yuc_gist_v1'); localStorage.removeItem('yuc_backup_warn_v1'); localStorage.removeItem('yuc_views_v1');");
   } finally {
     try { ws?.close(); } catch {}
     killBrowserTree(child, profile);

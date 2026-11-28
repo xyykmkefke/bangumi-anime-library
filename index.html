@@ -21,7 +21,7 @@
 <link rel="dns-prefetch" href="https://gcore.jsdelivr.net">
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.30">
+<meta name="version" content="1.6.31">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2518,7 +2518,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.30</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.31</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -5289,9 +5289,28 @@
     if (del) {
       e.stopPropagation();
       var views = loadViews();
-      views.splice(Number(del.dataset.viewDel), 1);
+      var idx = Number(del.dataset.viewDel);
+      var gone = views[idx];
+      // 数组下标可能是 NaN（属性被改坏）或越界：此前直接 splice 会静默什么都不删，
+      // 界面上却已经重绘过一遍，用户以为删掉了、下次打开还在
+      if (!gone) { renderViewsMenu(); return; }
+      views.splice(idx, 1);
       saveViews(views);
       renderViewsMenu();
+      // 保存的视图是用户手搭出来的筛选组合，删掉就得重搭一遍——此前既没有撤销，
+      // 连提示都没有，点错一下悄无声息地没了
+      toast('已删除视图：' + gone.name, {
+        label: '撤销',
+        fn: function () {
+          var cur = loadViews();
+          // 按原下标插回；若期间又删了别的视图导致下标失效，就放回末尾
+          if (idx >= 0 && idx <= cur.length) cur.splice(idx, 0, gone);
+          else cur.push(gone);
+          saveViews(cur);
+          renderViewsMenu();
+          toast('已恢复视图：' + gone.name);
+        }
+      });
       return;
     }
     var apply = e.target.closest('[data-view-apply]');
@@ -6463,6 +6482,15 @@
         var added = 0;
         var merged = 0;
         var skipped = 0;
+        // 导入前把**受影响条目**的原始状态记下来，供撤销精确回滚。
+        // 导入的语义是「合并」：已有条目的进度取 max，新条目直接放入——
+        // 两者都不可逆。尤其是进度取 max 这一步，用户导入一份旧的（或别的设备的）
+        // 备份后，本地进度被推高，界面上没有任何地方能改回去（改小进度要逐条操作，
+        // 还得记得原来是多少）。实测：本地 ep=2，导入 ep=12 的备份后变 12，无任何入口撤回。
+        // 只记受影响条目而不是整份清单：撤销时不必整体替换，用户导入后自己新加的、
+        // 改过的条目不会被一并抹掉（与清空撤销同一个理由）。
+        var preImport = {};
+        var touched = {};
         raw.forEach(function (entry, index) {
           var isObj = entry && typeof entry === 'object';
           var id = String(isObj ? entry.id : entry);
@@ -6488,12 +6516,21 @@
             if (norm.u > cap) norm.u = cap;
             myMap[id] = norm;
             clearDeleted(id);
+            // 新增条目：撤销时直接删掉即可，但要记下「这条原本不存在」
+            preImport[id] = null;
+            touched[id] = true;
             added += 1;
             return;
           }
           // 已有条目保留本地状态与加入时间，进度取较大值
-          cur.ep = Math.max(Number(cur.ep) || 0, ep);
+          var prevEp = Number(cur.ep) || 0;
+          cur.ep = Math.max(prevEp, ep);
           merged += 1;
+          // 只有真的被改动过的才记进撤销快照（进度没变就不需要回滚它）
+          if (cur.ep !== prevEp) {
+            preImport[id] = { s: cur.s, t: cur.t, ep: prevEp, u: cur.u };
+            touched[id] = true;
+          }
         });
         // 墓碑损坏时一并重置：syncNow 在 deletedCorrupt 时会拒绝同步，
         // 而导入只写 STORAGE_KEY、不碰 DEL_KEY，于是「导出备份后重新导入」
@@ -6513,8 +6550,45 @@
         // 没写进磁盘就不要报「导入完成」——toast 层已经会把文案降级成「未保存」，
         // 但这里再明确说一句，避免 skin 上出现「未保存：导入完成」这种自相矛盾的话
         if (!ok) return;
-        toast('导入完成：新增 ' + added + ' 部，合并 ' + merged + ' 部' +
-          (skipped ? '，跳过 ' + skipped + ' 条无效记录' : ''));
+        var summary = '导入完成：新增 ' + added + ' 部，合并 ' + merged + ' 部' +
+          (skipped ? '，跳过 ' + skipped + ' 条无效记录' : '');
+        // 一条都没动就不给撤销按钮：一个点了什么都不会发生的按钮比没有更差
+        if (!Object.keys(touched).length) {
+          toast(summary);
+          return;
+        }
+        toast(summary, {
+          label: '撤销',
+          fn: function () {
+            var rolled = 0;
+            var skippedDirty = 0;
+            Object.keys(preImport).forEach(function (id) {
+              var pre = preImport[id];
+              var now = myMap[id];
+              // 导入之后用户又亲手改过这一条（u 变新了）就不动它——
+              // 撤销导入不该顺手把用户导入后的操作一起抹掉
+              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              if (pre === null) {
+                // 原本不存在：删掉。同时补墓碑，否则云同步会把这条从远端又拉回来
+                if (myMap[id]) { delete myMap[id]; markDeleted(id); rolled += 1; }
+                return;
+              }
+              // 原本存在：恢复成导入前的状态
+              myMap[id] = { s: pre.s, t: pre.t, ep: pre.ep, u: pre.u };
+              clearDeleted(id);
+              rolled += 1;
+            });
+            if (!rolled) {
+              toast('导入后这些条目已被改动，未回滚');
+              return;
+            }
+            persistDeleted();
+            if (!saveMine()) return;
+            render();
+            toast('已撤销导入：回滚 ' + rolled + ' 部' +
+              (skippedDirty ? '，跳过 ' + skippedDirty + ' 部导入后被改动过的' : ''));
+          }
+        });
       } catch (err) {
         toast('导入失败：文件格式不正确');
       }

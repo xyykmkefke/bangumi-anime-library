@@ -173,6 +173,87 @@ const CASES = [
       });`,
     before: `      toast('已移除：' + name);`,
   },
+  // ---- 第四轮（2026-11-28）：撤销覆盖度补全 ----
+  {
+    // 缺陷态：删除视图既无撤销也无提示（第四轮修复前原样，splice 完直接重绘）
+    name: '删除已保存视图有撤销',
+    after: `      toast('已删除视图：' + gone.name, {
+        label: '撤销',
+        fn: function () {
+          var cur = loadViews();
+          // 按原下标插回；若期间又删了别的视图导致下标失效，就放回末尾
+          if (idx >= 0 && idx <= cur.length) cur.splice(idx, 0, gone);
+          else cur.push(gone);
+          saveViews(cur);
+          renderViewsMenu();
+          toast('已恢复视图：' + gone.name);
+        }
+      });
+      return;`,
+    before: `      return;`,
+  },
+  {
+    // 缺陷态：导入不提供撤销（第四轮修复前原样：只报一句结果就完事）。
+    // 整段替换而不是留残骸：只把 toast 换成单参调用会把后面的 fn 变成游离语法，
+    // 页面直接抛异常、整套验收在到达目标断言前就崩了，结果是「没测到」而不是「测出缺陷」。
+    name: '导入备份有撤销',
+    after: `        toast(summary, {
+          label: '撤销',
+          fn: function () {
+            var rolled = 0;
+            var skippedDirty = 0;
+            Object.keys(preImport).forEach(function (id) {
+              var pre = preImport[id];
+              var now = myMap[id];
+              // 导入之后用户又亲手改过这一条（u 变新了）就不动它——
+              // 撤销导入不该顺手把用户导入后的操作一起抹掉
+              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }
+              if (pre === null) {
+                // 原本不存在：删掉。同时补墓碑，否则云同步会把这条从远端又拉回来
+                if (myMap[id]) { delete myMap[id]; markDeleted(id); rolled += 1; }
+                return;
+              }
+              // 原本存在：恢复成导入前的状态
+              myMap[id] = { s: pre.s, t: pre.t, ep: pre.ep, u: pre.u };
+              clearDeleted(id);
+              rolled += 1;
+            });
+            if (!rolled) {
+              toast('导入后这些条目已被改动，未回滚');
+              return;
+            }
+            persistDeleted();
+            if (!saveMine()) return;
+            render();
+            toast('已撤销导入：回滚 ' + rolled + ' 部' +
+              (skippedDirty ? '，跳过 ' + skippedDirty + ' 部导入后被改动过的' : ''));
+          }
+        });`,
+    before: `        toast(summary);`,
+  },
+  {
+    // 缺陷态：撤销新增条目时不写墓碑 → 云同步会把它从远端拉回来。
+    // 注意这里只把 markDeleted 摘掉，进度回滚照旧 —— 两条断言是独立性质，
+    // 这样「进度回滚」仍 PASS 而「补写墓碑」FAIL，正好说明它们测的不是同一件事。
+    name: '撤销导入删除新增条目时补写墓碑',
+    after: `                if (myMap[id]) { delete myMap[id]; markDeleted(id); rolled += 1; }`,
+    before: `                if (myMap[id]) { delete myMap[id]; rolled += 1; }`,
+  },
+  {
+    // 缺陷态：撤销导入时无条件回滚，不检查导入后是否被改过
+    name: '撤销导入不覆盖导入后被改动过的条目',
+    after: `              if (now && pre && Number(now.u) > Number(pre.u)) { skippedDirty += 1; return; }`,
+    before: `              /* 缺陷态：不检查导入后是否被改动，一律回滚 */`,
+  },
+  {
+    // 缺陷态：一条都没改动时也给撤销按钮（点了什么都不会发生）
+    name: '导入无实际改动时不提供撤销按钮',
+    after: `        if (!Object.keys(touched).length) {
+          toast(summary);
+          return;
+        }`,
+    before: `        /* 缺陷态：不判断是否有实际改动，总是给撤销按钮 */`,
+  },
 ];
 
 function run(cmd, args, opts = {}) {
